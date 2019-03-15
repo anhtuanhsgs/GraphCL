@@ -24,7 +24,12 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
     torch.manual_seed(args.seed + rank)
     if gpu_id >= 0:
         torch.cuda.manual_seed(args.seed + rank)
-    env = Voronoi_env (env_conf)
+
+    if "EM_env" in args.env:
+        raw_list, gt_lbl_list = datasets
+        env = EM_env (raw_list, env_conf, type="train", gt_lbl_list=gt_lbl_list)
+    else:  
+        env = Voronoi_env (env_conf)
 
     if optimizer is None:
         if args.optimizer == 'RMSprop':
@@ -32,11 +37,18 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         if args.optimizer == 'Adam':
             optimizer = optim.Adam (shared_model.parameters (), lr=args.lr, amsgrad=args.amsgrad)
 
-        # env.seed (args.seed + rank)
+    # env.seed (args.seed + rank)
     player = Agent (None, env, args, None)
 
     player.gpu_id = gpu_id
-    player.model = UNet (env.observation_space.shape [0], args.features, 2)
+    if args.model == "UNet":
+        player.model = UNet (env.observation_space.shape [0], args.features, 2)
+    elif args.model == "FusionNetLstm":
+        player.model = FusionNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+    elif args.model == "FusionNet":
+        player.model = FusionNet (env.observation_space.shape [0], args.features, 2)
+    elif (args.model == "UNetLstm"):
+        player.model = UNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -66,11 +78,26 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                 if (0 <= (train_step % args.train_log_period) < args.max_episode_length) and train_step > 0:
                     print ("train: step", train_step, "\teps_reward", eps_reward)
                 if train_step > 0:
-                    pinned_eps_reward = eps_reward.mean ()
+                    pinned_eps_reward = player.env.sum_reward.mean ()
                     eps_reward = 0
+            if "Lstm" in args.model:
+                if gpu_id >= 0:
+                    with torch.cuda.device (gpu_id):
+                        player.cx, player.hx = player.model.lstm.init_hidden (batch_size=1, use_cuda=True)
+                else:
+                    player.cx, player.hx = player.model.lstm.init_hidden (batch_size=1, use_cuda=False)
+        elif "Lstm" in args.model:
+            player.cx = Variable (player.cx.data)
+            player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            player.action_train ()
+            #attempt 5
+            if (rank % 4 == 0):
+                player.action_train (use_lbl=True) 
+            else:
+                player.action_train () 
+
+            # player.action_train () #attempt 0~4
             if rank == 0:
                 eps_reward = player.reward.mean () + eps_reward
             if player.done:
@@ -87,7 +114,10 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
         R = torch.zeros (1, 1, env_conf ["size"][0], env_conf ["size"][1])
         if not player.done:
-            value, _ = player.model(Variable(player.state.unsqueeze(0)))
+            if "Lstm" in args.model:
+                value, _, _ = player.model((Variable(player.state.unsqueeze(0)), (player.hx, player.cx)))
+            else:
+                value, _ = player.model(Variable(player.state.unsqueeze(0)))
             R = value.data
 
         if gpu_id >= 0:
@@ -120,7 +150,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             # print (player.rewards [i])
             policy_loss = policy_loss - \
                 (player.log_probs[i] * Variable(gae)).mean () - \
-                (0.01 * player.entropies[i]).mean ()
+                (0.1 * player.entropies[i]).mean ()
 
         player.model.zero_grad ()
         sum_loss = (policy_loss + value_loss)
@@ -132,7 +162,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
         if rank == 0:
             train_step += 1
-            if train_step % args.log_period == 0:
+            if train_step % args.log_period == 0 and train_step > 0:
                 log_info = {
                     # 'train: sum_loss': sum_loss, 
                     'train: value_loss': value_loss, 

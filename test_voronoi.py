@@ -23,11 +23,16 @@ gpu_id = 0
 def setup_env_conf ():
 
     env_conf = {
-        "T": 4,
+        "T": 3,
         "size": [96, 96],
         "env_gpu": 0,
         "num_segs": 12,
-        "radius": 7,
+        "radius": 22,
+        "speed": 2,
+        # "reward": "gaussian",
+        # "reward": "normal",
+        "reward": "density",
+        "use_lbl": True
     }
     return env_conf
 
@@ -80,8 +85,8 @@ while not done:
     for c in range (len (obs)):
         tmp += [obs [c]]
     tmp = np.concatenate (tmp, 1)
-    print ("reward:", reward.shape)
-    print ("done: ", done)
+    # print ("reward:", reward.shape)
+    # print ("done: ", done)
     plt.imshow (tmp, cmap='gray')
     plt.show ()
     plt.imshow (reward, cmap='gray')

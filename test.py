@@ -37,7 +37,11 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
     if gpu_id >= 0:
         torch.cuda.manual_seed (args.seed)
 
-    env = Voronoi_env (env_conf)
+    if "EM_env" in args.env:
+        raw_list, gt_lbl_list = datasets
+        env = EM_env (raw_list, env_conf, type="train", gt_lbl_list=gt_lbl_list)
+    else:  
+        env = Voronoi_env (env_conf)
 
     reward_sum = 0
     start_time = time.time ()
@@ -48,7 +52,14 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
 
     player.gpu_id = gpu_id
     
-    player.model = UNet (env.observation_space.shape [0], args.features, 2)
+    if args.model == "UNet":
+        player.model = UNet (env.observation_space.shape [0], args.features, 2)
+    elif args.model == "FusionNetLstm":
+        player.model = FusionNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+    elif args.model == "FusionNet":
+        player.model = FusionNet (env.observation_space.shape [0], args.features, 2)
+    elif (args.model == "UNetLstm"):
+        player.model = UNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
