@@ -9,7 +9,7 @@ from utils import normal  # , pi
 import copy
 
 class Agent (object):
-    def __init__ (self, model, env, args, state):
+    def __init__ (self, model, env, args, state, rank=0):
         self.args = args
 
         self.model = model
@@ -32,10 +32,24 @@ class Agent (object):
         self.actions_explained = []
 
     def action_lbl_rand (self, lbl, action, t):
-        lbl_cp = lbl % 16
-        lbl_cp += (lbl_cp == 0) * (lbl > 0)
         val_list = np.unique (lbl)
-        
+        ret = np.zeros_like (action)
+
+        for val in val_list:
+            sigle_cell_map = lbl == val
+            sigle_cell_area = np.count_nonzero (sigle_cell_map)
+            action_tmp = action * sigle_cell_map
+            action_1_count = np.count_nonzero (action_tmp)
+            ratio = action_1_count / sigle_cell_area
+            sample = self.env.rng.rand ()
+            if (sample < ratio):
+                ret += sigle_cell_map
+        self.action = ret
+        ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
+        if self.gpu_id >= 0:
+            with torch.cuda.device(self.gpu_id):
+                ret = ret.cuda()
+        return ret
 
     def action_lbl (self, lbl, action, t):
 
@@ -88,7 +102,7 @@ class Agent (object):
 
             if use_lbl:
 
-                action = self.action_lbl (self.env.gt_lbl, self.action, self.env.step_cnt)
+                action = self.action_lbl_rand (self.env.gt_lbl, self.action, self.env.step_cnt)
 
             log_prob = log_prob.gather(1, Variable(action))
             state, self.reward, self.done, self.info = self.env.step(

@@ -107,10 +107,7 @@ def density_map (lbl):
         local_peak_dist = np.max (local_dist_map)
         local_peak_dist_list.append (local_peak_dist)
         ## attempt0~2
-        # ret += local_dist_map * (max_dist / local_peak_dist)
-
-        ## attempt3
-        ret += local_dist_map / local_peak_dist
+        ret += local_dist_map * (max_dist / local_peak_dist)
 
     ret = ret / np.max (ret)
     # ret = np.clip (ret, 0.33, 1.0)

@@ -40,6 +40,9 @@ class General_env (gym.Env):
         self.new_lbl = self.lbl + action * (2 ** (self.T - self.step_cnt - 1))
         done = False
 
+        ## Attempt 2, 7
+        # reward = self.calculate_reward_step_kernel ()
+
         ## Attempt 0
         reward = self.calculate_reward_step_lbl (w_map=self.w_map, density=self.density) # range (-max (density), max (density)) #Attempt 0~3 #Attempt 5
         # reward += self.background_reward () # range (-0.25, 0.25)  #Attempt 0~3
@@ -49,11 +52,10 @@ class General_env (gym.Env):
         # reward = self.calculate_reward_step_lbl (w_map=self.w_map, density=self.density) # range (-max (density), max (density))
         # reward += self.calculate_reward_step_action (w_map=self.w_map, density=self.density) / self.T # range (-max (density), max (density))
 
-        # reward += self.background_reward () # range (-0.25, 0.25)  
-        # reward += self.cell_reward () # range (-0.25, 0.25)
+        reward += self.background_reward () # range (-0.25, 0.25)  
+        reward += self.cell_reward () # range (-0.25, 0.25)
 
-        ## Attempt 2
-        # reward = self.calculate_reward_step_kernel ()
+        
 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
@@ -62,11 +64,11 @@ class General_env (gym.Env):
         info = {}
         self.rewards.append (reward)
         self.sum_reward += reward
-        
+
         if self.step_cnt >= self.T:
             done = True
-            plt.imshow (self.render ())
-            plt.show ()
+            # plt.imshow (self.render ())
+            # plt.show ()
 
         return self.observation (), reward, done, info
 
@@ -105,9 +107,9 @@ class General_env (gym.Env):
 
     # range (-max (density), max (density))
     def calculate_reward_step_lbl (self, w_map=None, density=None):
-        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=-1)
-        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=-1)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=-1)
+        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
+        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
+        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
         reward = np.zeros (self.size, dtype=np.float32)
         if density is not None:
             density_cp = np.pad (density, self.r, 'constant', constant_values=0)
@@ -122,10 +124,10 @@ class General_env (gym.Env):
                 y_base = r + yr; x_base = r + xr
 
                 I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                # split_pen = (I == False) & (I_hat == True) & ((I_old == True) | first_step) & (self.gt_lbl > 0)
-                # split_rew = (I == False) & (I_hat == False) & ((I_old == True) | first_step) & (self.gt_lbl > 0)
-                split_pen = (I == False) & (I_hat == True) & ((I_old == True) | first_step) # Attempt 5
-                split_rew = (I == False) & (I_hat == False) & ((I_old == True) | first_step) # Attempt 5
+                split_pen = (I == False) & (I_hat == True) & ((I_old == True) | first_step) & (self.gt_lbl > 0)
+                split_rew = (I == False) & (I_hat == False) & ((I_old == True) | first_step) & (self.gt_lbl > 0)
+                # split_pen = (I == False) & (I_hat == True) & ((I_old == True) | first_step) # Attempt 5
+                # split_rew = (I == False) & (I_hat == False) & ((I_old == True) | first_step) # Attempt 5
                 split_pen, split_rew = self.tofloat ([split_pen, split_rew])
                 tmp = split_pen * -1 + split_rew
             
@@ -152,7 +154,7 @@ class General_env (gym.Env):
         reward = np.zeros (self.size, dtype=np.float32)
         if density is not None:
             density_cp = np.pad (density, self.r, 'constant', constant_values=0) #Attempt 0~3
-            density_cp = np.pad (density, self.r, 'constant', constant_values=0.25) #Attempt 4
+            # density_cp = np.pad (density, self.r, 'constant', constant_values=0.25) #Attempt 4
             norm_map = np.zeros_like (reward)
         r = self.r
         for yr in range (-r, r + 1, self.speed):
@@ -304,8 +306,9 @@ class General_env (gym.Env):
         for reward_i in [self.sum_reward] + self.rewards:
             reward_i = ((reward_i + 3.5) / 7 * 255).astype (np.uint8) # Attempt 0
             # reward_i = ((reward_i + max_reward) / (2 * max_reward) * 255).astype (np.uint8) # Attempt 1
-            # reward_i = ((reward_i + 1) / 2 * 255).astype (np.uint8)
             # reward_i = ((reward_i + 1) / 2 * 255).astype (np.uint8) # Attempt 5
+            # reward_i = ((reward_i + 1.25) / 2.5 * 255).astype (np.uint8) # Attempt 7
+
             reward_i = np.repeat (np.expand_dims (reward_i, -1), 3, -1)
             rewards.append (reward_i)
         while (len (rewards) < self.T + 1):

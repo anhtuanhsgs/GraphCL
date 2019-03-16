@@ -92,7 +92,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
         for step in range(args.num_steps):
             #attempt 5
-            if (rank % 4 == 0):
+            if (rank % 3 == 1):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
