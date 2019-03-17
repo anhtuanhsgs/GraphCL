@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from .conv_lstm import ConvLSTMCell
+import numpy as np
 
 class INELU (nn.Module):
     def __init__ (self, out_ch):
@@ -90,10 +91,9 @@ class FusionNet (nn.Module):
         self.up3 = FusionUp (features[2], features[1])
         self.up2 = FusionUp (features[1], features[0])
         self.up1 = FusionUp (features[0], features[0])
-        self.last_layer = nn.Sequential (
-            nn.Conv2d (features[0], out_ch, 3, padding=1, bias=True),
-            nn.Tanh ()
-        )
+        self.actor = nn.Conv2d (features[0], out_ch, 3, padding=1, bias=True)
+        self.critic = nn.Conv2d (features[0], 1, 3, padding=1, bias=True)
+
 
     def forward (self, x):
         x = self.first_layer (x)
@@ -106,9 +106,10 @@ class FusionNet (nn.Module):
         up3 = self.up3 (up4 + down3)
         up2 = self.up2 (up3 + down2)
         up1 = self.up1 (up2 + down1)
-
-        out = (self.last_layer (up1 + x) + 1.0) / 2
-        return out
+        x = up1 + x
+        actor = self.actor (x)
+        critic = self.critic (x)
+        return critic, actor
 
 class double_conv(nn.Module):
     '''(conv => BN => ReLU) * 2'''
@@ -165,17 +166,7 @@ class UNet_up(nn.Module):
         self.conv = double_conv(in_ch, out_ch)
 
     def forward(self, x1, x2):
-        # # input is CHW
         x1 = self.up (x1)
-        # diffY = x2.size()[2] - x1.size()[2]
-        # diffX = x2.size()[3] - x1.size()[3]
-
-        # x1 = F.pad(x1, (diffX // 2, diffX - diffX//2,
-        #                 diffY // 2, diffY - diffY//2))
-        # for padding issues, see 
-        # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
-        # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-
         x = torch.cat([x2, x1], dim=1)
         x = self.conv(x)
         return x
@@ -205,7 +196,6 @@ class UNet (nn.Module):
         self.actor = outconv(features [0], out_ch)
         self.critic = outconv (features [0], 1)
 
-
     def forward(self, x):
         x1 = self.inc(x)
         x2 = self.down1(x1)
@@ -231,9 +221,78 @@ def debug (tensor):
     for i in range (shape [0]):
         print (tensor_np [i])
 
+class FusionNetLstm (nn.Module):
+    def __init__ (self, in_size, features, out_ch, hidden_channels=256):
+        super (FusionNetLstm, self).__init__ ()
+        self.first_layer = nn.Sequential (INELU (in_size [0]), 
+            nn.Conv2d (in_size [0], features[0], 3, bias=True, padding=1))
+        self.down1 = FusionDown (features[0], features[0])
+        self.down2 = FusionDown (features[0], features[1])
+        self.down3 = FusionDown (features[1], features[2])
+        self.down4 = FusionDown (features[2], features[3])
+        self.middle = nn.Dropout (p=0.5)
+        self.up4 = FusionUp (features[3], features[2])
+        self.up3 = FusionUp (features[2], features[1])
+        self.up2 = FusionUp (features[1], features[0])
+        self.up1 = FusionUp (features[0], features[0])
+        self.lstm = ConvLSTMCell (in_size[1:], features [0], hidden_channels, kernel_size=(3, 3), bias=True)
+        self.actor = nn.Conv2d (hidden_channels, out_ch, 3, padding=1, bias=True)
+        self.critic = nn.Conv2d (hidden_channels, 1, 3, padding=1, bias=True)
+            
+    def forward (self, inputs):
+        x, (hx, cx) = inputs
+        x = self.first_layer (x)
+        down1 = self.down1 (x)
+        down2 = self.down2 (down1)
+        down3 = self.down3 (down2)
+        down4 = self.down4 (down3)
+        middle = self.middle (down4)
+        up4 = self.up4 (middle)
+        up3 = self.up3 (up4 + down3)
+        up2 = self.up2 (up3 + down2)
+        up1 = self.up1 (up2 + down1)
+        x = up1 + x
+        hx, cx = self.lstm (x, (hx, cx))
+        x = hx
+        return self.critic (x), self.actor (x), (hx, cx)
+
+class UNetLstm (nn.Module):
+    def __init__(self, in_size, features, out_ch, hidden_channels):
+        super(UNetLstm, self).__init__()
+        self.inc = inconv(in_size [0], features [0])
+        self.down1 = UNet_down(features[0], features[1])
+        self.down2 = UNet_down(features[1], features[2])
+        self.down3 = UNet_down(features[2], features[3])
+        self.down4 = UNet_down(features[3], features[3])
+        self.up1 = UNet_up(features[3] * 2, features[2])
+        self.up2 = UNet_up(features[2] * 2, features[1])
+        self.up3 = UNet_up(features[1] * 2, features[0])
+        self.up4 = UNet_up(features[0] * 2, features[0])
+        self.lstm = ConvLSTMCell (in_size[1:], features [0], hidden_channels, kernel_size=(3, 3), bias=True)
+        self.actor = outconv(hidden_channels, out_ch)
+        self.critic = outconv (hidden_channels, 1)
+
+    def forward(self, inputs):
+        x, (hx, cx) = inputs
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        x = self.up1(x5, x4)
+
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        hx, cx = self.lstm (x, (hx, cx))
+        x = hx
+        actor = self.actor (x)
+        critic = self.critic (x)
+        return critic, actor, (hx, cx)
+
 if __name__ == "__main__":
     FEATURES = [16, 32, 64, 128]
-    model = UNet (in_ch=5, features=FEATURES, out_ch=2)
+    model = UNet (5, features=FEATURES, out_ch=2)
     x = torch.zeros ((1,5,256,256), dtype=torch.float32)
     value, logit = model (x)
 
@@ -246,20 +305,32 @@ if __name__ == "__main__":
     # m = distribution (prob)
     # print (m.sample ().shape)
 
-    logit = torch.rand ((1, 2, 3, 4))
-    prob = F.softmax (logit, 1)
-    debug (prob)
-    prob_tp = prob.permute (0, 2, 3, 1)
-    distribution = torch.distributions.Categorical (prob_tp)
-    sample = distribution.sample ()
-    print (prob_tp.shape)
-    shape = prob_tp.shape
-    action = sample.reshape (1, shape[1], shape[2], 1).permute (0, 3, 1, 2)
-    debug (sample)
-    action_prob = prob.gather (1, action)
-    debug (action_prob)
-    print (action_prob.shape)
-    print (action_prob[0][0].shape)
+    # logit = torch.rand ((1, 2, 3, 4))
+    # prob = F.softmax (logit, 1)
+    # debug (prob)
+    # prob_tp = prob.permute (0, 2, 3, 1)
+    # distribution = torch.distributions.Categorical (prob_tp)
+    # sample = distribution.sample ()
+    # print (prob_tp.shape)
+    # shape = prob_tp.shape
+    # action = sample.reshape (1, shape[1], shape[2], 1).permute (0, 3, 1, 2)
+    # debug (sample)
+    # action_prob = prob.gather (1, action)
+    # debug (action_prob)
+    # print (action_prob.shape)
+    # print (action_prob[0][0].shape)
 
     # action_max = prob.max (1)[1]
     # print (action_max.shape)
+
+    nhidden = 128
+    model = FusionNetLstm ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
+    x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    hx, cx = model.lstm.init_hidden (batch_size=1, use_cuda=False)
+    value, logit, (hx, cx) = model ((x, (hx, cx)))
+    print (value.shape)
+    print (logit.shape)
+    print (hx.shape)
+    print (cx.shape)
+     
+
