@@ -189,10 +189,10 @@ class General_env (gym.Env):
         foregr_ratio = np.count_nonzero (self.gt_lbl) / np.prod (self.gt_lbl.shape)
         # backgr reward, penalty
         reward += ((self.lbl == 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
-        reward += ((self.lbl != 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
+        reward -= ((self.lbl != 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
         # foregr reward, penalty
         reward += ((self.lbl != 0) & (self.gt_lbl != 0)).astype (np.float32) * (1 - foregr_ratio)
-        reward += ((self.lbl == 0) & (self.gt_lbl != 0)).astype (np.float32) * (1 - foregr_ratio)
+        reward -= ((self.lbl == 0) & (self.gt_lbl != 0)).astype (np.float32) * (1 - foregr_ratio)
         return reward
 
     def observation (self):
