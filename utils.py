@@ -95,7 +95,6 @@ def density_map (lbl):
         return np.ones (lbl.shape, dtype=np.float32)
     distance = ndi.distance_transform_edt(lbl)
     idx_list = np.unique (lbl)
-    # distance = distance + 1.5 * np.std (distance)
     
     max_dist = np.max (distance)
     local_peak_dist_list = []
@@ -106,12 +105,10 @@ def density_map (lbl):
         local_dist_map = distance * (lbl == i)
         local_peak_dist = np.max (local_dist_map)
         local_peak_dist_list.append (local_peak_dist)
-        ## attempt0~2
         ret += local_dist_map * (max_dist / local_peak_dist)
 
     ret = ret / np.max (ret)
-    # ret = np.clip (ret, 0.33, 1.0)
-    ret = ret * 2 + 1.0
+    ret = np.clip (ret, 0.33, 1.0) * (ret == 0)
     return ret [1:, 1:][:-1,:-1]
 
 def weights_init(m):
