@@ -13,6 +13,7 @@ from skimage.measure import label
 from skimage.filters import sobel
 from malis import rand_index 
 from sklearn.metrics import adjusted_rand_score
+import matplotlib.pyplot as plt
 
 def setup_logger(logger_name, log_file, level=logging.INFO):
     l = logging.getLogger(logger_name)
@@ -108,7 +109,8 @@ def density_map (lbl):
         ret += local_dist_map * (max_dist / local_peak_dist)
 
     ret = ret / np.max (ret)
-    ret = np.clip (ret, 0.33, 1.0) * (ret == 0)
+    ret = np.clip (ret, 0.33, 1.0) * (ret > 0)
+    ret = np.clip (ret, 0.1, 1.0)
     return ret [1:, 1:][:-1,:-1]
 
 def weights_init(m):

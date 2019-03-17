@@ -51,35 +51,6 @@ class Agent (object):
                 ret = ret.cuda()
         return ret
 
-    def action_lbl (self, lbl, action, t):
-
-        lbl_cp = lbl % 16
-        lbl_cp += (lbl_cp == 0) * (lbl > 0)
-        # val_list = np.unique (lbl)
-        ret = np.zeros_like (action)
-        lbl_cp = lbl_cp // (2 ** t)
-        lbl_cp = (lbl_cp - (lbl_cp // 2) * 2) % 2
-
-        ret += lbl_cp > 0   
-        self.action = ret [::]
-
-        # for val in val_list:
-            # sigle_cell_map = lbl == val
-            # sigle_cell_area = np.count_nonzero (sigle_cell_map)
-            # action_tmp = action * sigle_cell_map
-            # action_1_count = np.count_nonzero (action_tmp)
-            # if (action_1_count > sigle_cell_area / 2):
-            #     ret += sigle_cell_map
-        # self.action = ret
-
-        ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
-
-        if self.gpu_id >= 0:
-            with torch.cuda.device(self.gpu_id):
-                ret = ret.cuda()
-        # print (ret.shape, ret.dtype, ret.cpu().numpy() [0][0])
-        return ret
-
     def action_train (self, use_max=False, use_lbl=False):
         if "Lstm" in self.args.model:
             value, logit, (self.hx, self.cx) = self.model((Variable(
@@ -101,7 +72,6 @@ class Agent (object):
             self.action = action.cpu().numpy() [0][0]
 
             if use_lbl:
-
                 action = self.action_lbl_rand (self.env.gt_lbl, self.action, self.env.step_cnt)
 
             log_prob = log_prob.gather(1, Variable(action))

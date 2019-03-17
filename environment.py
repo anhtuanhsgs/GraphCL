@@ -40,7 +40,8 @@ class General_env (gym.Env):
         self.new_lbl = self.lbl + action * (2 ** (self.T - self.step_cnt - 1))
         done = False
 
-        reward = self.middle_step_reward (density=self.density)        
+        reward = self.middle_step_reward (density=self.density)  
+        
 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
@@ -48,13 +49,12 @@ class General_env (gym.Env):
         self.step_cnt += 1
         info = {}
         self.rewards.append (reward)
-        self.sum_reward += reward
 
         if self.step_cnt >= self.T:
             done = True
-            self.reward += self.final_step_reward (density=self.density)
-            self.reward += self.foregr_backgr_reward ()
-
+            reward += self.final_step_reward (density=self.density)
+            reward += self.foregr_backgr_reward ()
+        self.sum_reward += reward
         return self.observation (), reward, done, info
 
     def shuffle_lbl (self, lbl):
@@ -72,6 +72,8 @@ class General_env (gym.Env):
         self.density = None
         if self.config ["reward"] == "density":
             self.density = density_map (self.gt_lbl)
+        else:
+            self.density = np.onse (self.size, dtype=np.float32)
 
     def get_I (self, lbl_cp, new_lbl_cp, yr, xr, r):
         y_base = r + yr; x_base = r + xr
@@ -90,6 +92,7 @@ class General_env (gym.Env):
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
         new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
         self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
+        density_cp = np.pad (self.density, self.r, 'constant', constant_values=0)
         reward = np.zeros (self.size, dtype=np.float32)
         r = self.r
         I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
@@ -107,8 +110,11 @@ class General_env (gym.Env):
                 density_u = density
                 I_hat_true_cnt += density_v * (I_hat == True)
                 I_hat_false_cnt += density_v * (I_hat == False)
-                true_split_reward += density_u * (I_hat == False) & (I == False) * density_v * ((I_old == True) | first_step)
-                false_split_penalty += density_u * (I_hat == True) & (I == False) * density_v * ((I_old == True) | first_step)
+                true_split_reward += density_u * ((I_hat == False) & (I == False) & ((I_old == True) | first_step)) * density_v
+                false_split_penalty += density_u * ((I_hat == True) & (I == False) & ((I_old == True) | first_step)) * density_v
+
+        I_hat_false_cnt += (I_hat_false_cnt == 0)
+        I_hat_true_cnt += (I_hat_true_cnt == 0)
         reward += true_split_reward / I_hat_false_cnt
         reward -= false_split_penalty / I_hat_true_cnt
         return reward
@@ -117,6 +123,7 @@ class General_env (gym.Env):
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
         new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
         self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
+        density_cp = np.pad (self.density, self.r, 'constant', constant_values=0)
         reward = np.zeros (self.size, dtype=np.float32)
         r = self.r
         I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
@@ -134,11 +141,13 @@ class General_env (gym.Env):
                 density_u = density
                 I_hat_true_cnt += density_v * (I_hat == True)
                 I_hat_false_cnt += density_v * (I_hat == False)
-                true_merge_reward += density_u * (I_hat == True) & (I == True) * density_v
-                true_merge_penalty += density_u * (I_hat == False) & (I == True) * density_v
+                true_merge_reward += density_u * ((I_hat == True) & (I == True)) * density_v
+                true_merge_penalty += density_u * ((I_hat == False) & (I == True)) * density_v
+        
+        I_hat_false_cnt += (I_hat_false_cnt == 0)
+        I_hat_true_cnt += (I_hat_true_cnt == 0)
         reward -= true_merge_penalty / I_hat_false_cnt
         reward += true_merge_reward / I_hat_true_cnt
-
         return reward
 
     def calculate_reward_step_kernel (self):

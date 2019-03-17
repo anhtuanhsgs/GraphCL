@@ -120,14 +120,14 @@ parser.add_argument(
 parser.add_argument(
     '--save-period',
     type=int,
-    default=50,
+    default=100,
     metavar='SP',
     help='Save period')
 
 parser.add_argument(
     '--log-period',
     type=int,
-    default=5,
+    default=10,
     metavar='LP',
     help='Log period')
 
