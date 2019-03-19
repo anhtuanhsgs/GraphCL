@@ -41,7 +41,9 @@ class Agent (object):
             action_tmp = action * sigle_cell_map
             action_1_count = np.count_nonzero (action_tmp)
             ratio = action_1_count / sigle_cell_area
+            ratio = np.clip (ratio, 0.1, 0.9)
             sample = self.env.rng.rand ()
+
             if (sample < ratio):
                 ret += sigle_cell_map
         self.action = ret
