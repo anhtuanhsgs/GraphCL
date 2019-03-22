@@ -4,3 +4,4 @@ Data/*
 logs/*
 __pycache__/*
 trained_models/*
+Utils/.ipynb_checkpoints/
