@@ -97,7 +97,7 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
             num_tests += 1
             reward_total_sum += reward_sum
             reward_mean = reward_total_sum / num_tests
-            if hasLbl and num_tests %  (args.log_period // 3) == 0:
+            if hasLbl:
                 log ['{}_log'.format (args.env)].info (
                     "VALID: Time {0}, episode reward {1}, num tests {4}, episode length {2}, reward mean {3:.4f}".
                     format (

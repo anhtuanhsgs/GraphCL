@@ -1,0 +1,6 @@
+*.tif
+*.pyc
+Data/*
+logs/*
+__pycache__/*
+trained_models/*
