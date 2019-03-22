@@ -91,21 +91,14 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-<<<<<<< HEAD
-            # if (rank % 5 == 0):
-            #     player.action_train (use_lbl=True) 
-            # else:
-            #     player.action_train () 
-=======
-        #     if (rank % 3 == 0):
-        #         player.action_train (use_lbl=True) 
-        #     else:
-        #         player.action_train () 
->>>>>>> parent of af4e6ab... Attempt 1: use random segment labeling
+            if (rank % 5 == 0):
+                player.action_train (use_lbl=True) 
+            else:
+                player.action_train () 
 
-            player.action_train ()
+            # player.action_train ()
             if rank == 0:
-                eps_reward = player.reward.mean () + eps_reward
+                eps_reward = player.env.sum_reward.mean ()
             if player.done:
                 break
 
@@ -140,6 +133,9 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         R = Variable(R)
 
         for i in reversed(range(len(player.rewards))):
+            # if rank == 0:
+            #     plt.imshow (player.rewards[i][0][0])
+            #     plt.show ()
             if gpu_id >= 0:
                 with torch.cuda.device (gpu_id):
                     reward_i = torch.tensor (player.rewards [i]).cuda ()

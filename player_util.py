@@ -53,7 +53,7 @@ class Agent (object):
                 ret = ret.cuda()
         return ret
 
-    def action_train (self, use_max=False, use_lbl=False):
+    def action_train (self, use_max=False, use_lbl=False, even_step_reward=True):
         if "Lstm" in self.args.model:
             value, logit, (self.hx, self.cx) = self.model((Variable(
             self.state.unsqueeze(0)), (self.hx, self.cx)))
@@ -90,6 +90,10 @@ class Agent (object):
         self.values.append(value)
         self.log_probs.append(log_prob)
         self.rewards.append(self.reward [None][None])
+        if even_step_reward:
+            self.rewards = []
+            for i in range (self.env.T):
+                self.rewards += [self.env.sum_reward [None][None]/ self.env.T]
         self.eps_len += 1
         return self
 
