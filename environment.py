@@ -45,6 +45,8 @@ class General_env (gym.Env):
 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
+        if self.T == 1:
+            self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
 
         self.step_cnt += 1
         info = {}
@@ -129,7 +131,7 @@ class General_env (gym.Env):
         I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
         I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
         true_merge_reward = np.zeros (self.size, dtype=np.float32)
-        true_merge_penalty = np.zeros (self.size, dtype=np.float32)
+        false_merge_penalty = np.zeros (self.size, dtype=np.float32)
 
         for yr in range (-r, r + 1, self.speed):
             for xr in range (-r, r + 1, self.speed):
@@ -142,11 +144,11 @@ class General_env (gym.Env):
                 I_hat_true_cnt += density_v * (I_hat == True)
                 I_hat_false_cnt += density_v * (I_hat == False)
                 true_merge_reward += density_u * ((I_hat == True) & (I == True)) * density_v
-                true_merge_penalty += density_u * ((I_hat == False) & (I == True)) * density_v
+                false_merge_penalty += density_u * ((I_hat == False) & (I == True)) * density_v
         
         I_hat_false_cnt += (I_hat_false_cnt == 0)
         I_hat_true_cnt += (I_hat_true_cnt == 0)
-        reward -= true_merge_penalty / I_hat_false_cnt
+        reward -= false_merge_penalty / I_hat_false_cnt
         reward += true_merge_reward / I_hat_true_cnt
         return reward
 
@@ -218,6 +220,7 @@ class General_env (gym.Env):
     def render (self):
         raw = np.repeat (np.expand_dims (self.raw, -1), 3, -1).astype (np.uint8)
         lbl = self.lbl.astype (np.int32)
+
         lbl = lbl2rgb (lbl)
         gt_lbl = lbl2rgb (self.gt_lbl)
         

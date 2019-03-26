@@ -324,7 +324,7 @@ if __name__ == "__main__":
     # print (action_max.shape)
 
     nhidden = 128
-    model = FusionNetLstm ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
+    model = FusionNetLstm ((5, 256, 256), FEATURES, 12, hidden_channels=nhidden)
     x = torch.zeros ((1,5,256,256), dtype=torch.float32)
     hx, cx = model.lstm.init_hidden (batch_size=1, use_cuda=False)
     value, logit, (hx, cx) = model ((x, (hx, cx)))

@@ -39,16 +39,18 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
     # env.seed (args.seed + rank)
     player = Agent (None, env, args, None)
-
+    num_actions = 2
+    if args.one_step:
+        num_actions = args.one_step
     player.gpu_id = gpu_id
     if args.model == "UNet":
-        player.model = UNet (env.observation_space.shape [0], args.features, 2)
+        player.model = UNet (env.observation_space.shape [0], args.features, num_actions)
     elif args.model == "FusionNetLstm":
-        player.model = FusionNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+        player.model = FusionNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif args.model == "FusionNet":
-        player.model = FusionNet (env.observation_space.shape [0], args.features, 2)
+        player.model = FusionNet (env.observation_space.shape [0], args.features, num_actions)
     elif (args.model == "UNetLstm"):
-        player.model = UNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+        player.model = UNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -74,6 +76,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         
         if player.done:
             player.eps_len = 0
+
             if rank == 0:
                 if (0 <= (train_step % args.train_log_period) < args.max_episode_length) and train_step > 0:
                     print ("train: step", train_step, "\teps_reward", eps_reward)
@@ -91,12 +94,12 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            if (rank % 5 == 0):
+            if (rank % 4 == 0):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
-
             # player.action_train ()
+
             if rank == 0:
                 eps_reward = player.env.sum_reward.mean ()
             if player.done:

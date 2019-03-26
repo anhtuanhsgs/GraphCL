@@ -36,16 +36,19 @@ class Agent (object):
         ret = np.zeros_like (action)
 
         for val in val_list:
-            sigle_cell_map = lbl == val
-            sigle_cell_area = np.count_nonzero (sigle_cell_map)
-            action_tmp = action * sigle_cell_map
-            action_1_count = np.count_nonzero (action_tmp)
-            ratio = action_1_count / sigle_cell_area
-            ratio = np.clip (ratio, 0.1, 0.9)
-            sample = self.env.rng.rand ()
-
-            if (sample < ratio):
-                ret += sigle_cell_map
+            single_cell_map = lbl == val
+            pixels_list = np.where (single_cell_map)
+            rand_index = self.env.rng.randint (len (pixels_list [0]))
+            color_val = action [pixels_list [0][rand_index], pixels_list [1][rand_index]]
+            # sigle_cell_area = np.count_nonzero (sigle_cell_map)
+            # action_tmp = action * sigle_cell_map
+            # action_1_count = np.count_nonzero (action_tmp)
+            # ratio = action_1_count / sigle_cell_area
+            # ratio = np.clip (ratio, 0.1, 0.9)
+            # sample = self.env.rng.rand ()
+            # if (sample < ratio):
+            #     ret += sigle_cell_map
+            ret += single_cell_map * color_val
         self.action = ret
         ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
         if self.gpu_id >= 0:
@@ -53,7 +56,7 @@ class Agent (object):
                 ret = ret.cuda()
         return ret
 
-    def action_train (self, use_max=False, use_lbl=False, even_step_reward=True):
+    def action_train (self, use_max=False, use_lbl=False):
         if "Lstm" in self.args.model:
             value, logit, (self.hx, self.cx) = self.model((Variable(
             self.state.unsqueeze(0)), (self.hx, self.cx)))
@@ -90,11 +93,6 @@ class Agent (object):
         self.values.append(value)
         self.log_probs.append(log_prob)
         self.rewards.append(self.reward [None][None])
-        if even_step_reward:
-            self.rewards = []
-            for i in range (self.env.T):
-                self.rewards += [self.env.sum_reward [None][None]/ self.env.T]
-        self.eps_len += 1
         return self
 
     def action_test (self):

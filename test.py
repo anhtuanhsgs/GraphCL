@@ -51,15 +51,18 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
     player = Agent (None, env, args, None)
 
     player.gpu_id = gpu_id
+    num_actions = 2
+    if args.one_step:
+        num_actions = args.one_step
     
     if args.model == "UNet":
-        player.model = UNet (env.observation_space.shape [0], args.features, 2)
+        player.model = UNet (env.observation_space.shape [0], args.features, num_actions)
     elif args.model == "FusionNetLstm":
-        player.model = FusionNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+        player.model = FusionNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif args.model == "FusionNet":
-        player.model = FusionNet (env.observation_space.shape [0], args.features, 2)
+        player.model = FusionNet (env.observation_space.shape [0], args.features, num_actions)
     elif (args.model == "UNetLstm"):
-        player.model = UNetLstm (env.observation_space.shape, args.features, 2, args.hidden_feat)
+        player.model = UNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()

@@ -205,7 +205,15 @@ parser.add_argument (
     default=16
 )
 
+parser.add_argument (
+    "--one-step",
+    type=int,
+    default=None
+)
+
 def setup_env_conf (args):
+    if args.one_step:
+        args.max_episode_length = 1
 
     env_conf = {
         "T": args.max_episode_length,
@@ -219,6 +227,8 @@ def setup_env_conf (args):
         "ker_step": args.kernel_step,
     }
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
+    if args.one_step:
+        env_conf ["max_lbl"] = args.one_step
 
     if "Lstm" in args.model:
         args.env += "_lstm"
@@ -251,14 +261,18 @@ if __name__ == '__main__':
     if "EM_env" in args.env:
         raw, gt_lbl = setup_data (env_conf)
 
+    num_actions = 2
+    if args.one_step:
+        num_actions = args.one_step
+
     if (args.model == 'UNet'):
-        shared_model = UNet (env_conf ["observation_shape"][0], args.features, 2)
+        shared_model = UNet (env_conf ["observation_shape"][0], args.features, num_actions)
     elif (args.model == "FusionNetLstm"):
-        shared_model = FusionNetLstm (env_conf ["observation_shape"], args.features, 2, args.hidden_feat)
+        shared_model = FusionNetLstm (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
     elif (args.model == "FusionNet"):
-        shared_model = FusionNet (env_conf ["observation_shape"][0], args.features, 2)
+        shared_model = FusionNet (env_conf ["observation_shape"][0], args.features, num_actions)
     elif (args.model == "UNetLstm"):
-        shared_model = UNetLstm (env_conf ["observation_shape"], args.features, 2, args.hidden_feat)
+        shared_model = UNetLstm (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
 
     if args.load:
         saved_state = torch.load(
@@ -278,13 +292,13 @@ if __name__ == '__main__':
         optimizer = None
 
     processes = []
-    if "EM_env" in args.env:
-        p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
-    else:
-        p = mp.Process(target=test, args=(args, shared_model, env_conf))
-    p.start()
-    processes.append(p)
-    time.sleep(0.1)
+    # if "EM_env" in args.env:
+    #     p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
+    # else:
+    #     p = mp.Process(target=test, args=(args, shared_model, env_conf))
+    # p.start()
+    # processes.append(p)
+    # time.sleep(0.1)
 
     # if "EM_env" in args.env:
     #     p = mp.Process(target=test, args=(args, shared_model, env_conf, 
