@@ -45,6 +45,10 @@ class General_env (gym.Env):
 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
+        
+        if self.step_cnt == 1:
+            reward += self.first_step_reward ()
+
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
 
@@ -89,6 +93,14 @@ class General_env (gym.Env):
         for arr in arrs:
             ret.append (arr.astype (np.float32))
         return ret
+
+    def first_step_reward (self, density=None):
+        reward = np.zeros (self.size, dtype=np.float32)
+        reward += (self.new_lbl == 1) & (self.gt_lbl != 0)
+        reward += (self.new_lbl == 0) & (self.gt_lbl == 0)
+        reward -= (self.new_lbl == 0) & (self.gt_lbl != 0)
+        reward -= (self.new_lbl == 1) & (self.gt_lbl == 0)
+        return reward
 
     def middle_step_reward (self, density=None):
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)

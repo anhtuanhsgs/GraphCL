@@ -134,7 +134,7 @@ parser.add_argument(
 parser.add_argument (
     '--train-log-period',
     type=int,
-    default=32,
+    default=16,
     metavar='TLP',
 )
 
@@ -292,13 +292,13 @@ if __name__ == '__main__':
         optimizer = None
 
     processes = []
-    # if "EM_env" in args.env:
-    #     p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
-    # else:
-    #     p = mp.Process(target=test, args=(args, shared_model, env_conf))
-    # p.start()
-    # processes.append(p)
-    # time.sleep(0.1)
+    if "EM_env" in args.env:
+        p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
+    else:
+        p = mp.Process(target=test, args=(args, shared_model, env_conf))
+    p.start()
+    processes.append(p)
+    time.sleep(0.1)
 
     # if "EM_env" in args.env:
     #     p = mp.Process(target=test, args=(args, shared_model, env_conf, 

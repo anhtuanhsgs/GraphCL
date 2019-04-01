@@ -37,18 +37,20 @@ class Agent (object):
 
         for val in val_list:
             single_cell_map = lbl == val
-            pixels_list = np.where (single_cell_map)
-            rand_index = self.env.rng.randint (len (pixels_list [0]))
-            color_val = action [pixels_list [0][rand_index], pixels_list [1][rand_index]]
-            # sigle_cell_area = np.count_nonzero (sigle_cell_map)
-            # action_tmp = action * sigle_cell_map
-            # action_1_count = np.count_nonzero (action_tmp)
-            # ratio = action_1_count / sigle_cell_area
-            # ratio = np.clip (ratio, 0.1, 0.9)
-            # sample = self.env.rng.rand ()
-            # if (sample < ratio):
-            #     ret += sigle_cell_map
-            ret += single_cell_map * color_val
+            # pixels_list = np.where (single_cell_map)
+            # rand_index = self.env.rng.randint (len (pixels_list [0]))
+            # color_val = action [pixels_list [0][rand_index], pixels_list [1][rand_index]]
+            # ret += single_cell_map * color_val
+
+            single_cell_area = np.count_nonzero (single_cell_map)
+            action_tmp = action * single_cell_map
+            action_1_count = np.count_nonzero (action_tmp)
+            ratio = action_1_count / single_cell_area
+            ratio = np.clip (ratio, 0.05, 0.95)
+            sample = self.env.rng.rand ()
+            if (sample < ratio):
+                ret += single_cell_map
+        
         self.action = ret
         ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
         if self.gpu_id >= 0:

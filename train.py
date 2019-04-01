@@ -94,7 +94,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            if (rank % 4 == 0):
+            if (rank % 5 == 0):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
@@ -155,7 +155,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             # print (player.rewards [i])
             policy_loss = policy_loss - \
                 (player.log_probs[i] * Variable(gae)).mean () - \
-                (0.1 * player.entropies[i]).mean ()
+                (0.05 * player.entropies[i]).mean ()
 
         player.model.zero_grad ()
         sum_loss = (policy_loss + value_loss)
