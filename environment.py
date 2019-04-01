@@ -59,7 +59,7 @@ class General_env (gym.Env):
         if self.step_cnt >= self.T:
             done = True
             reward += self.final_step_reward (density=self.density)
-            reward += self.foregr_backgr_reward ()
+            # reward += self.foregr_backgr_reward ()
         self.sum_reward += reward
         return self.observation (), reward, done, info
 

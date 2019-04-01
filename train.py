@@ -94,7 +94,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            if (rank % 5 == 0):
+            if (rank % 8 == 0):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
