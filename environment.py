@@ -45,10 +45,10 @@ class General_env (gym.Env):
 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
-        
-        if self.step_cnt == 1:
-            reward += self.first_step_reward ()
 
+        if self.step_cnt == 0:
+            reward += self.first_step_reward ()
+            
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
 
@@ -61,6 +61,7 @@ class General_env (gym.Env):
             reward += self.final_step_reward (density=self.density)
             # reward += self.foregr_backgr_reward ()
         self.sum_reward += reward
+
         return self.observation (), reward, done, info
 
     def shuffle_lbl (self, lbl):
@@ -79,7 +80,7 @@ class General_env (gym.Env):
         if self.config ["reward"] == "density":
             self.density = density_map (self.gt_lbl)
         else:
-            self.density = np.onse (self.size, dtype=np.float32)
+            self.density = np.ones (self.size, dtype=np.float32)
 
     def get_I (self, lbl_cp, new_lbl_cp, yr, xr, r):
         y_base = r + yr; x_base = r + xr
@@ -96,10 +97,10 @@ class General_env (gym.Env):
 
     def first_step_reward (self, density=None):
         reward = np.zeros (self.size, dtype=np.float32)
-        reward += (self.new_lbl == 1) & (self.gt_lbl != 0)
+        reward += (self.new_lbl != 0) & (self.gt_lbl != 0)
         reward += (self.new_lbl == 0) & (self.gt_lbl == 0)
         reward -= (self.new_lbl == 0) & (self.gt_lbl != 0)
-        reward -= (self.new_lbl == 1) & (self.gt_lbl == 0)
+        reward -= (self.new_lbl != 0) & (self.gt_lbl == 0)
         return reward
 
     def middle_step_reward (self, density=None):

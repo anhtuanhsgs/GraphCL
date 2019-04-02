@@ -16,7 +16,7 @@ from random import shuffle
 
 import colorsys
 
-N = 28
+N = 84
 HSV_tuples = [(x*1.0/N, 0.5, 0.5) for x in range(N)]
 RGB_tuples = list (map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples))
 
