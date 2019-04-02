@@ -51,6 +51,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.model = FusionNet (env.observation_space.shape [0], args.features, num_actions)
     elif (args.model == "UNetLstm"):
         player.model = UNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
+    elif (args.model == "FCN_GRU"):
+        player.model = DilatedFCN_GRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -83,18 +85,28 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                 if train_step > 0:
                     pinned_eps_reward = player.env.sum_reward.mean ()
                     eps_reward = 0
+
             if "Lstm" in args.model:
                 if gpu_id >= 0:
                     with torch.cuda.device (gpu_id):
                         player.cx, player.hx = player.model.lstm.init_hidden (batch_size=1, use_cuda=True)
                 else:
                     player.cx, player.hx = player.model.lstm.init_hidden (batch_size=1, use_cuda=False)
+            if "GRU" in args.model:
+                if gpu_id >= 0:
+                    with torch.cuda.device (gpu_id):
+                        player.hx = player.model.gru.init_hidden (batch_size=1, use_cuda=True)
+                else:
+                    player.hx = player.model.gru.init_hidden (batch_size=1, use_cuda=False)
+
         elif "Lstm" in args.model:
             player.cx = Variable (player.cx.data)
             player.hx = Variable (player.hx.data)
+        elif "GRU" in args.model:
+            player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            if (rank % 8 == 0):
+            if (rank % 6 == 0):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
@@ -118,6 +130,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         if not player.done:
             if "Lstm" in args.model:
                 value, _, _ = player.model((Variable(player.state.unsqueeze(0)), (player.hx, player.cx)))
+            elif "GRU" in args.model:
+                value, _, _ = player.model((Variable(player.state.unsqueeze(0)), player.hx))
             else:
                 value, _ = player.model(Variable(player.state.unsqueeze(0)))
             R = value.data

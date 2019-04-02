@@ -179,7 +179,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm"]
+    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU"]
 )
 
 parser.add_argument (
@@ -211,6 +211,8 @@ parser.add_argument (
     default=None
 )
 
+
+
 def setup_env_conf (args):
     if args.one_step:
         args.max_episode_length = 1
@@ -229,7 +231,8 @@ def setup_env_conf (args):
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
     if args.one_step:
         env_conf ["max_lbl"] = args.one_step
-
+    if "GRU" in args.model:
+        args.env += "_GRU"
     if "Lstm" in args.model:
         args.env += "_lstm"
     if args.use_lbl:
@@ -273,6 +276,8 @@ if __name__ == '__main__':
         shared_model = FusionNet (env_conf ["observation_shape"][0], args.features, num_actions)
     elif (args.model == "UNetLstm"):
         shared_model = UNetLstm (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
+    elif (args.model == "FCN_GRU"):
+        shared_model = DilatedFCN_GRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
 
     if args.load:
         saved_state = torch.load(
@@ -292,13 +297,13 @@ if __name__ == '__main__':
         optimizer = None
 
     processes = []
-    # if "EM_env" in args.env:
-    #     p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
-    # else:
-    #     p = mp.Process(target=test, args=(args, shared_model, env_conf))
-    # p.start()
-    # processes.append(p)
-    # time.sleep(0.1)
+    if "EM_env" in args.env:
+        p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
+    else:
+        p = mp.Process(target=test, args=(args, shared_model, env_conf))
+    p.start()
+    processes.append(p)
+    time.sleep(0.1)
 
     # if "EM_env" in args.env:
     #     p = mp.Process(target=test, args=(args, shared_model, env_conf, 

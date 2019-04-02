@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .conv_lstm import ConvLSTMCell
+from .conv_gru import ConvGRUCell
 import numpy as np
 
 class INELU (nn.Module):
@@ -173,9 +174,9 @@ class UNet_up(nn.Module):
 
 
 class outconv(nn.Module):
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, kernel_size=3, bias=True):
         super(outconv, self).__init__()
-        self.conv = nn.Conv2d(in_ch, out_ch, 1)
+        self.conv = nn.Conv2d(in_ch, out_ch, kernel_size, bias=bias, padding=kernel_size//2)
 
     def forward(self, x):
         x = self.conv(x)
@@ -290,11 +291,60 @@ class UNetLstm (nn.Module):
         critic = self.critic (x)
         return critic, actor, (hx, cx)
 
+
+class DilatedModule (nn.Module):
+    def __init__ (self, in_ch, out_ch, factors=[1,2,3,4], bias=False):
+        super(DilatedModule, self).__init__()
+        self.dilconv0 = nn.Sequential (nn.Conv2d (in_ch, out_ch, kernel_size=3, dilation=factors[0], padding=1, bias=bias), nn.ELU ())
+        self.dilconv1 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[1], padding=2, bias=bias), nn.ELU ())
+        self.dilconv2 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[2], padding=3, bias=bias), nn.ELU ())
+        self.dilconv3 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[3], padding=4, bias=bias), nn.ELU ())
+        self.in_norm3 = nn.InstanceNorm2d (out_ch)
+        self.dropout3 = nn.Dropout (p=0.125)
+
+    def forward (self, x):
+        x = self.dilconv0 (x)
+        x = self.dilconv1 (x)
+        x = self.dilconv2 (x)
+        x = self.dilconv3 (x)
+        x = self.in_norm3 (x)
+        x = self.dropout3 (x)
+        return x
+
+class DilatedFCN_GRU (nn.Module):
+    def __init__ (self, in_size, features, out_ch, hidden_channels):
+        super (DilatedFCN_GRU, self).__init__ ()
+        self.module0 = DilatedModule (in_size[0], features[0])
+        self.module1 = DilatedModule (features[0], features[1])
+        self.module2 = DilatedModule (features[1], features[2])
+        self.module3 = DilatedModule (features[2], features[3])
+        hidden_in_shape = [features[3]] + [in_size[1], in_size[2]]
+        self.gru = ConvGRUCell (hidden_in_shape, hidden_channels, 7)
+        self.actor_conv0 = outconv(hidden_channels, features[3], kernel_size=5)
+        self.critic_conv0 = outconv (hidden_channels, features[3], kernel_size=5)
+        self.actor = outconv(features[3], out_ch, kernel_size=3)
+        self.critic = outconv(features[3], 1, kernel_size=3)
+
+    def forward (self, inputs):
+        x, hx = inputs
+        x0 = self.module0 (x)
+        x1 = self.module1 (x0)
+        x2 = self.module2 (x0 + x1)
+        x3 = self.module3 (x2)
+        hx = self.gru (x3 + x2, hx)
+        x = hx
+        actor = self.actor_conv0 (x)
+        actor = self.actor (actor)
+        critic = self.critic_conv0 (x)
+        critic = self.critic (critic)
+        return critic, actor, hx
+
+
 if __name__ == "__main__":
-    FEATURES = [16, 32, 64, 128]
-    model = UNet (5, features=FEATURES, out_ch=2)
-    x = torch.zeros ((1,5,256,256), dtype=torch.float32)
-    value, logit = model (x)
+    # FEATURES = [16, 32, 64, 128]
+    # model = UNet (5, features=FEATURES, out_ch=2)
+    # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    # value, logit = model (x)
 
     # print (torch.rand ((1, 4, 4)))
     # # prob = prob.transpose (1, -1)
@@ -323,14 +373,23 @@ if __name__ == "__main__":
     # action_max = prob.max (1)[1]
     # print (action_max.shape)
 
-    nhidden = 128
-    model = FusionNetLstm ((5, 256, 256), FEATURES, 12, hidden_channels=nhidden)
+    # nhidden = 128
+    # model = FusionNetLstm ((5, 256, 256), FEATURES, 12, hidden_channels=nhidden)
+    # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    # hx, cx = model.lstm.init_hidden (batch_size=1, use_cuda=False)
+    # value, logit, (hx, cx) = model ((x, (hx, cx)))
+    # print (value.shape)
+    # print (logit.shape)
+    # print (hx.shape)
+    # print (cx.shape)
+     
+
+    nhidden = 256
+    FEATURES = [64, 64, 128, 128]
+    model = DilatedFCN_GRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
     x = torch.zeros ((1,5,256,256), dtype=torch.float32)
-    hx, cx = model.lstm.init_hidden (batch_size=1, use_cuda=False)
-    value, logit, (hx, cx) = model ((x, (hx, cx)))
+    hx = torch.zeros ((1, nhidden, 256, 256), dtype=torch.float32)
+    value, logit, hx = model ((x, hx))
     print (value.shape)
     print (logit.shape)
     print (hx.shape)
-    print (cx.shape)
-     
-

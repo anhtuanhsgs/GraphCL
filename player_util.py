@@ -61,7 +61,10 @@ class Agent (object):
     def action_train (self, use_max=False, use_lbl=False):
         if "Lstm" in self.args.model:
             value, logit, (self.hx, self.cx) = self.model((Variable(
-            self.state.unsqueeze(0)), (self.hx, self.cx)))
+                self.state.unsqueeze(0)), (self.hx, self.cx)))
+        elif "GRU" in self.args.model:
+            value, logit, self.hx = self.model((Variable(
+                self.state.unsqueeze(0)), self.hx))
         else:
             value, logit = self.model (Variable(self.state.unsqueeze(0)))
         prob = F.softmax(logit, dim=1)
@@ -110,6 +113,16 @@ class Agent (object):
                     self.cx = Variable (self.cx)
                     self.hx = Variable (self.hx)
                 value, logit, (self.hx, self.cx) = self.model((Variable (self.state.unsqueeze(0)), (self.hx, self.cx)))
+            elif "GRU" in self.args.model:
+                if self.done:
+                    if self.gpu_id >= 0:
+                        with torch.cuda.device (self.gpu_id):
+                            self.hx = self.model.gru.init_hidden (batch_size=1, use_cuda=True)
+                    else:
+                        self.hx = self.model.gru.init_hidden (batch_size=1, use_cuda=False)
+                else:
+                    self.hx = Variable (self.hx)
+                value, logit, self.hx = self.model((Variable (self.state.unsqueeze(0)), self.hx))
             else:
                 value, logit = self.model(Variable (self.state.unsqueeze(0)))
             
