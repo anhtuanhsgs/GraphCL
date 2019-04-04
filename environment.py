@@ -29,9 +29,9 @@ class General_env (gym.Env):
         self.size = config ["size"]
         self.speed = config ["speed"]
         if config ["use_lbl"]:
-            self.observation_space = Box (0, 1.0, shape=[self.T + 2] + self.size, dtype=np.float32)
+            self.observation_space = Box (0, 1.0, shape=[config["observation_shape"][0]] + self.size, dtype=np.float32)
         else:
-            self.observation_space = Box (-1.0, 1.0, shape=[self.T + 1] + self.size, dtype=np.float32)
+            self.observation_space = Box (-1.0, 1.0, shape=[config["observation_shape"][0]] + self.size, dtype=np.float32)
         self.rng = np.random.RandomState(time_seed ())
         self.max_lbl = 2 ** self.T - 1
 
@@ -41,13 +41,14 @@ class General_env (gym.Env):
         done = False
 
         reward = self.middle_step_reward (density=self.density)  
-        
-
+        reward += self.final_step_reward (density=self.density, last_step=(self.step_cnt>=self.T)) / self.T
+                
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
 
-        if self.step_cnt == 0:
-            reward += self.first_step_reward ()
+        reward += self.foregr_backgr_reward () / self.T
+        # if self.step_cnt == 0:
+        #     reward += self.first_step_reward ()
 
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
@@ -58,10 +59,18 @@ class General_env (gym.Env):
 
         if self.step_cnt >= self.T:
             done = True
-            reward += self.final_step_reward (density=self.density)
             # reward += self.foregr_backgr_reward ()
         self.sum_reward += reward
-
+        
+        # tmp = self.observation ()
+        # debug_img = []
+        # for img in tmp:
+        #     debug_img += [img]
+        # debug_img = np.concatenate (debug_img, 1)
+        # plt.imshow (debug_img)
+        # plt.show ()
+        # plt.imshow (self.render ())
+        # plt.show ()
         return self.observation (), reward, done, info
 
     def shuffle_lbl (self, lbl):
@@ -135,7 +144,7 @@ class General_env (gym.Env):
         reward -= false_split_penalty / I_hat_true_cnt
         return reward
 
-    def final_step_reward (self, density=None):
+    def final_step_reward (self, density=None, last_step=False):
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
         new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
         self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
@@ -162,7 +171,8 @@ class General_env (gym.Env):
         
         I_hat_false_cnt += (I_hat_false_cnt == 0)
         I_hat_true_cnt += (I_hat_true_cnt == 0)
-        reward -= false_merge_penalty / I_hat_false_cnt
+        if last_step:
+            reward -= (false_merge_penalty / I_hat_false_cnt) * self.T
         reward += true_merge_reward / I_hat_true_cnt
         return reward
 
@@ -202,7 +212,8 @@ class General_env (gym.Env):
 
     def foregr_backgr_reward (self):
         reward = np.zeros (self.size, dtype=np.float32)
-        foregr_ratio = np.count_nonzero (self.gt_lbl) / np.prod (self.gt_lbl.shape)
+        # foregr_ratio = np.count_nonzero (self.gt_lbl) / np.prod (self.gt_lbl.shape)
+        foregr_ratio = 0.67
         # backgr reward, penalty
         reward += ((self.lbl == 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
         reward -= ((self.lbl != 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
@@ -213,6 +224,7 @@ class General_env (gym.Env):
 
     def observation (self):
         if not self.config ["use_lbl"]:
+            
             obs = np.concatenate ([
                     self.raw [None] * 2 - 255.0,
                     self.mask,
@@ -220,10 +232,15 @@ class General_env (gym.Env):
 
         else:
             lbl = self.lbl / self.max_lbl * 255.0
+            done_mask = np.zeros_like (self.raw)
+            if self.step_cnt >= self.T:
+                done_mask += 255.0
+
             obs = np.concatenate ([
                     self.raw [None].astype (np.float32),
                     lbl [None], 
-                    (self.mask + 255.0) / 2
+                    done_mask [None],
+                    # (self.mask + 255.0) / 2
                 ])
         if self.obs_format == "CHW":
             ret = obs.astype (np.float32) / 255.0

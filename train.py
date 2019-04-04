@@ -53,6 +53,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.model = UNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif (args.model == "FCN_GRU"):
         player.model = DilatedFCN_GRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
+    elif (args.model == "UNetGRU"):
+        player.model = UNetGRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -106,7 +108,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         for step in range(args.num_steps):
-            if (rank % 6 == 0):
+            if (rank % 8 == 0):
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 

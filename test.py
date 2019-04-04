@@ -65,6 +65,8 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
         player.model = UNetLstm (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif (args.model == "FCN_GRU"):
         player.model = DilatedFCN_GRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
+    elif (args.model == "UNetGRU"):
+        player.model = UNetGRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()

@@ -172,6 +172,19 @@ class UNet_up(nn.Module):
         x = self.conv(x)
         return x
 
+class UNet_up_res (nn.Module):
+    def __init__(self, in_ch, out_ch, bias=False):
+        super(UNet_up_res, self).__init__()
+        self.up = nn.ConvTranspose2d(in_ch, out_ch, kernel_size=3, stride=2, bias=bias)
+        self.conv = double_conv (out_ch, out_ch)
+
+    def forward (self, x1, x2):
+        x1 = self.up (x1)
+        N, C, H, W = x1.shape
+        x1 = x1 [:,:,0:H-1, 0:W-1]
+        x = x1 + x2
+        x = self.conv (x)
+        return x
 
 class outconv(nn.Module):
     def __init__(self, in_ch, out_ch, kernel_size=3, bias=True):
@@ -339,6 +352,45 @@ class DilatedFCN_GRU (nn.Module):
         critic = self.critic (critic)
         return critic, actor, hx
 
+class UNetGRU (nn.Module):
+    def __init__(self, in_size, features, out_ch, hidden_channels):
+        super(UNetGRU, self).__init__()
+        self.inc = inconv(in_size [0], features [0])
+        self.down1 = UNet_down(features[0], features[1])
+        self.down2 = UNet_down(features[1], features[2])
+        self.down3 = UNet_down(features[2], features[3])
+        self.down4 = UNet_down(features[3], features[3])
+        self.up1 = UNet_up_res(features[3], features[3])
+        self.up2 = UNet_up_res(features[3], features[2])
+        self.up3 = UNet_up_res(features[2], features[1])
+        self.up4 = UNet_up_res(features[1], features[0])
+        hidden_in_shape = [features[0]] + [in_size[1], in_size[2]]
+        self.gru = ConvGRUCell (hidden_in_shape, hidden_channels, 3)
+        self.actor_conv0 = nn.Sequential (nn.Conv2d (hidden_channels, hidden_channels // 2, 
+                                kernel_size=3, padding=1, bias=True), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.critic_conv0 =nn.Sequential (nn.Conv2d (hidden_channels, hidden_channels // 2, 
+                                kernel_size=3, padding=1, bias=True), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.actor = outconv(hidden_channels // 2, out_ch)
+        self.critic = outconv (hidden_channels // 2, 1)
+
+    def forward(self, inputs):
+        x, hx = inputs
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        x = self.up1(x5, x4)
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        hx = self.gru (x, hx)
+        x = hx
+        actor = self.actor_conv0 (x)
+        actor = self.actor (actor)
+        critic = self.critic_conv0 (x)
+        critic = self.critic (critic)
+        return critic, actor, hx
 
 if __name__ == "__main__":
     # FEATURES = [16, 32, 64, 128]
@@ -384,9 +436,19 @@ if __name__ == "__main__":
     # print (cx.shape)
      
 
+    # nhidden = 256
+    # FEATURES = [64, 64, 128, 128]
+    # model = DilatedFCN_GRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
+    # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    # hx = torch.zeros ((1, nhidden, 256, 256), dtype=torch.float32)
+    # value, logit, hx = model ((x, hx))
+    # print (value.shape)
+    # print (logit.shape)
+    # print (hx.shape)
+
     nhidden = 256
-    FEATURES = [64, 64, 128, 128]
-    model = DilatedFCN_GRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
+    FEATURES = [8, 16, 32, 64]
+    model = UNetGRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
     x = torch.zeros ((1,5,256,256), dtype=torch.float32)
     hx = torch.zeros ((1, nhidden, 256, 256), dtype=torch.float32)
     value, logit, hx = model ((x, hx))

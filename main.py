@@ -179,7 +179,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU"]
+    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU", "UNetGRU"]
 )
 
 parser.add_argument (
@@ -211,6 +211,10 @@ parser.add_argument (
     default=None
 )
 
+parser.add_argument (
+    '--downsample',
+    action="store_true"
+)
 
 
 def setup_env_conf (args):
@@ -237,7 +241,9 @@ def setup_env_conf (args):
         args.env += "_lstm"
     if args.use_lbl:
         args.env += "_lbl"
-        env_conf ["observation_shape"][0] = env_conf ["T"] + 2
+        # env_conf ["observation_shape"][0] = env_conf ["T"] + 2
+        env_conf ["observation_shape"][0] = 3
+
     args.env += "_" + args.reward
     args.log_dir += args.env + "/"
     args.save_model_dir += args.env + "/"
@@ -263,6 +269,9 @@ if __name__ == '__main__':
 
     if "EM_env" in args.env:
         raw, gt_lbl = setup_data (env_conf)
+        if args.downsample:
+            raw = raw [:, ::2, ::2]
+            gt_lbl = gt_lbl [:, ::2, ::2]
 
     num_actions = 2
     if args.one_step:
@@ -278,6 +287,8 @@ if __name__ == '__main__':
         shared_model = UNetLstm (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
     elif (args.model == "FCN_GRU"):
         shared_model = DilatedFCN_GRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
+    elif (args.model == "UNetGRU"):
+        shared_model = UNetGRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
 
     if args.load:
         saved_state = torch.load(
@@ -312,6 +323,7 @@ if __name__ == '__main__':
     #     processes.append(p)
     #     time.sleep(1)
 
+    # for rank in range(0, 1):
     for rank in range(0, args.workers):
         if "EM_env" in args.env:
             p = mp.Process(
