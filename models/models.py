@@ -293,22 +293,18 @@ class UNetLstm (nn.Module):
 
 
 class DilatedModule (nn.Module):
-    def __init__ (self, in_ch, out_ch, factors=[1,2,3,4], bias=False):
+    def __init__ (self, in_ch, out_ch, factors=[1,2,4,8], bias=False):
         super(DilatedModule, self).__init__()
-        self.dilconv0 = nn.Sequential (nn.Conv2d (in_ch, out_ch, kernel_size=3, dilation=factors[0], padding=1, bias=bias), nn.ELU ())
-        self.dilconv1 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[1], padding=2, bias=bias), nn.ELU ())
-        self.dilconv2 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[2], padding=3, bias=bias), nn.ELU ())
-        self.dilconv3 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[3], padding=4, bias=bias), nn.ELU ())
-        self.in_norm3 = nn.InstanceNorm2d (out_ch)
-        self.dropout3 = nn.Dropout (p=0.125)
+        self.dilconv0 = nn.Sequential (nn.Conv2d (in_ch, out_ch, kernel_size=3, dilation=factors[0], padding=1, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.dilconv1 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[1], padding=2, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.dilconv2 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[2], padding=4, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.dilconv3 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[3], padding=8, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
 
     def forward (self, x):
         x = self.dilconv0 (x)
         x = self.dilconv1 (x)
         x = self.dilconv2 (x)
         x = self.dilconv3 (x)
-        x = self.in_norm3 (x)
-        x = self.dropout3 (x)
         return x
 
 class DilatedFCN_GRU (nn.Module):
@@ -318,10 +314,13 @@ class DilatedFCN_GRU (nn.Module):
         self.module1 = DilatedModule (features[0], features[1])
         self.module2 = DilatedModule (features[1], features[2])
         self.module3 = DilatedModule (features[2], features[3])
+        self.dropout3 = nn.Dropout (0.5)
         hidden_in_shape = [features[3]] + [in_size[1], in_size[2]]
-        self.gru = ConvGRUCell (hidden_in_shape, hidden_channels, 7)
-        self.actor_conv0 = outconv(hidden_channels, features[3], kernel_size=5)
-        self.critic_conv0 = outconv (hidden_channels, features[3], kernel_size=5)
+        self.gru = ConvGRUCell (hidden_in_shape, hidden_channels, 3)
+        self.actor_conv0 = nn.Sequential (nn.Conv2d (hidden_channels, features[3], 
+                                kernel_size=3, padding=1, bias=True), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.critic_conv0 =nn.Sequential (nn.Conv2d (hidden_channels, features[3], 
+                                kernel_size=3, padding=1, bias=True), nn.InstanceNorm2d (out_ch), nn.ELU ())
         self.actor = outconv(features[3], out_ch, kernel_size=3)
         self.critic = outconv(features[3], 1, kernel_size=3)
 
@@ -329,8 +328,9 @@ class DilatedFCN_GRU (nn.Module):
         x, hx = inputs
         x0 = self.module0 (x)
         x1 = self.module1 (x0)
-        x2 = self.module2 (x0 + x1)
+        x2 = self.module2 (x1 + x0)
         x3 = self.module3 (x2)
+        x3 = self.dropout3 (x3)
         hx = self.gru (x3 + x2, hx)
         x = hx
         actor = self.actor_conv0 (x)
