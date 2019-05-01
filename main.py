@@ -194,6 +194,11 @@ parser.add_argument (
 )
 
 parser.add_argument (
+    "--use-masks",
+    action="store_true"
+)
+
+parser.add_argument (
     "--kernel-size",
     type=int,
     default=32
@@ -216,6 +221,11 @@ parser.add_argument (
     action="store_true"
 )
 
+parser.add_argument (
+    '--cell-norm',
+    action="store_true"
+)
+
 
 def setup_env_conf (args):
     if args.one_step:
@@ -229,8 +239,10 @@ def setup_env_conf (args):
         "speed": args.speed,
         "reward": args.reward,
         "use_lbl": args.use_lbl,
+        "use_masks": args.use_masks,
         "ker_size": args.kernel_size,
         "ker_step": args.kernel_step,
+        "cell_norm": args.cell_norm,
     }
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
     if args.one_step:
@@ -241,8 +253,12 @@ def setup_env_conf (args):
         args.env += "_lstm"
     if args.use_lbl:
         args.env += "_lbl"
-        # env_conf ["observation_shape"][0] = env_conf ["T"] + 2
-        env_conf ["observation_shape"][0] = 3
+        # env_conf ["observation_shape"][0] = env_conf ["T"] + 2 + 1 
+        # env_conf ["observation_shape"][0] = env_conf ["T"] + 2 
+        env_conf ["observation_shape"][0] = 3 #Raw, lbl, stop
+    if args.use_masks:
+        args.env += "_masks"
+        env_conf ["observation_shape"][0] += env_conf ["T"]
 
     args.env += "_" + args.reward
     args.log_dir += args.env + "/"
