@@ -226,6 +226,10 @@ parser.add_argument (
     action="store_true"
 )
 
+parser.add_argument (
+    '--quality',
+    action="store_true"
+)
 
 def setup_env_conf (args):
     if args.one_step:
@@ -243,6 +247,7 @@ def setup_env_conf (args):
         "ker_size": args.kernel_size,
         "ker_step": args.kernel_step,
         "cell_norm": args.cell_norm,
+        "quality": args.quality,
     }
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
     if args.one_step:

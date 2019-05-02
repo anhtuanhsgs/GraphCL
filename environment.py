@@ -55,12 +55,26 @@ class General_env (gym.Env):
 
         self.step_cnt += 1
         info = {}
-        
+        # print ("action")
+        # plt.imshow (action)
+        # plt.show ()
+        if self.config ["quality"]:
+            current_score = self.merge_quality () * self.split_quality () * self.cell_quality ()
+            reward = current_score - self.old_score
+            self.old_score = current_score
+
+
+        # print ("current_score")
+        # plt.imshow (current_score)
+        # plt.show ()
+        # print ("reward")
+        # plt.imshow (reward)
+        # plt.show ()
 
         if self.step_cnt >= self.T:
             done = True
             reward += self.merge_quality () * self.split_quality ()
-            reward += self.foregr_backgr_reward () * 0.5
+            reward += self.foregr_backgr_reward () * 0.2
             # reward += self.final_step_reward (density=self.density, last_step=(self.step_cnt>=self.T)) 
 
         if self.config ["cell_norm"]:
@@ -106,6 +120,12 @@ class General_env (gym.Env):
                 log_cel_size = np.log (cell_size)
                 # self.norm_map += (self.gt_lbl == lbl) * (1.0 - min (cell_size * 2.5, window_area * 0.9) / window_area)
                 self.norm_map += (self.gt_lbl == lbl) * (1.0 - log_cel_size / log_window_area)
+        if self.config ["quality"]:
+            self.new_lbl = np.zeros (self.size, dtype=np.int32)
+            self.old_score = self.merge_quality () * self.split_quality () * self.cell_quality ()
+            # print ("old_score")
+            # plt.imshow (self.old_score)
+            # plt.show ()
 
     def get_I (self, lbl_cp, new_lbl_cp, yr, xr, r):
         y_base = r + yr; x_base = r + xr
@@ -121,43 +141,62 @@ class General_env (gym.Env):
         return ret
 
     def merge_quality (self):
+        # Based on IOU
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
         new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
         self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
         ret = np.zeros (self.size, dtype=np.float32)
         r = self.r
-        I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
+        intersection = np.zeros (self.size, dtype=np.float32)
+        union = np.zeros (self.size, dtype=np.float32)
         for yr in range (-r, r + 1, self.speed):
             for xr in range (-r, r + 1, self.speed):
                 if (yr == 0 and xr == 0):
                     continue
                 y_base = r + yr; x_base = r + xr
                 I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                I_hat_true_cnt += (I_hat == True)
-                ret += ((I_hat == True) & (I == True))
-        ret = ret / (I_hat_true_cnt + 1)
+                intersection += (I_hat == True) & (I == True)
+                union += ((I_hat == True) | (I == True))
+        union += 1
+        ret = intersection / union
         return ret
 
     def split_quality (self):
+        # Based on IOU
         lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
         new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
         self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
         ret = np.zeros (self.size, dtype=np.float32)
         r = self.r
-        I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
+        intersection = np.zeros (self.size, dtype=np.float32)
+        union = np.zeros (self.size, dtype=np.float32)
         for yr in range (-r, r + 1, self.speed):
             for xr in range (-r, r + 1, self.speed):
                 if (yr == 0 and xr == 0):
                     continue
                 y_base = r + yr; x_base = r + xr
                 I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                I_hat_false_cnt += (I_hat == False)
-                ret += ((I_hat == False) & (I == False))
-        ret = ret / (I_hat_false_cnt + 1)
+                intersection += (I_hat == False) & (I == False)
+                union += ((I_hat == False) | (I == False))
+        union += 1
+        ret = intersection / union
         return ret
 
     def cell_quality (self):
-        pass
+        new_lbl = self.new_lbl
+        gt_lbl = self.gt_lbl
+        ret = np.zeros (self.size, dtype=np.float32)
+        gt_lbl_values = np.unique (gt_lbl)
+        lbl_values = np.unique (new_lbl)
+        #Union
+        for gt_value in gt_lbl_values:
+            single_cell_map = gt_lbl == gt_value
+            for value in lbl_values:
+                value_map = value == new_lbl
+                intersection = single_cell_map * (value_map * np.sum (value_map * single_cell_map))
+                union = np.sum (single_cell_map | value_map) + 1
+                ret += intersection / union
+        return ret
 
     def first_step_reward (self, density=None):
         reward = np.zeros (self.size, dtype=np.float32)
