@@ -231,6 +231,11 @@ parser.add_argument (
     action="store_true"
 )
 
+parser.add_argument (
+    '--DEBUG',
+    action="store_true"
+)
+
 def setup_env_conf (args):
     if args.one_step:
         args.max_episode_length = 1
@@ -248,6 +253,7 @@ def setup_env_conf (args):
         "ker_step": args.kernel_step,
         "cell_norm": args.cell_norm,
         "quality": args.quality,
+        "DEBUG": args.DEBUG,
     }
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
     if args.one_step:
@@ -275,6 +281,9 @@ def setup_data (env_conf):
     raw , gt_lbl = get_data (path='Data/train/', args=None)
     raw = raw 
     gt_lbl = gt_lbl
+    if (env_conf ["DEBUG"]):
+        raw = raw[:1]
+        gt_lbl = gt_lbl [:1]
     return raw, gt_lbl
 
 if __name__ == '__main__':

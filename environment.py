@@ -41,56 +41,35 @@ class General_env (gym.Env):
         done = False
 
         reward = np.zeros (self.size, dtype=np.float32)
-        # reward = self.middle_step_reward (density=self.density)  
+        reward = self.middle_step_reward (density=self.density)  
                 
         self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
 
-        # reward += self.foregr_backgr_reward () / self.T
-        # if self.step_cnt == 0:
-        #     reward += self.first_step_reward ()
+        reward += self.foregr_backgr_reward () / self.T
+        if self.step_cnt == 0:
+            reward += self.first_step_reward () * 0.2
 
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
 
         self.step_cnt += 1
         info = {}
-        # print ("action")
-        # plt.imshow (action)
-        # plt.show ()
         if self.config ["quality"]:
             current_score = self.merge_quality () * self.split_quality () * self.cell_quality ()
             reward = current_score - self.old_score
             self.old_score = current_score
 
-
-        # print ("current_score")
-        # plt.imshow (current_score)
-        # plt.show ()
-        # print ("reward")
-        # plt.imshow (reward)
-        # plt.show ()
-
         if self.step_cnt >= self.T:
             done = True
-            reward += self.merge_quality () * self.split_quality ()
-            reward += self.foregr_backgr_reward () * 0.2
-            # reward += self.final_step_reward (density=self.density, last_step=(self.step_cnt>=self.T)) 
+            # reward += self.merge_quality () * self.split_quality ()
+            # reward += self.foregr_backgr_reward () * 0.2
+            reward += self.final_step_reward (density=self.density, last_step=(self.step_cnt>=self.T)) 
 
         if self.config ["cell_norm"]:
             reward = reward * self.norm_map
         self.rewards.append (reward)    
         self.sum_reward += reward
-        
-        # tmp = self.observation ()
-        # debug_img = []
-        # for img in tmp:
-        #     debug_img += [img]
-        # debug_img = np.concatenate (debug_img, 1)
-        # plt.imshow (debug_img)
-        # plt.show ()
-        # plt.imshow (self.render ())
-        # plt.show ()
 
         return self.observation (), reward, done, info
 
@@ -118,8 +97,8 @@ class General_env (gym.Env):
                 window_area =  self.size[0] * self.size[1]
                 log_window_area = np.log (window_area)
                 log_cel_size = np.log (cell_size)
-                # self.norm_map += (self.gt_lbl == lbl) * (1.0 - min (cell_size * 2.5, window_area * 0.9) / window_area)
-                self.norm_map += (self.gt_lbl == lbl) * (1.0 - log_cel_size / log_window_area)
+                self.norm_map += (self.gt_lbl == lbl) * (1.0 - min (cell_size * 2.5, window_area * 0.8) / window_area)
+                # self.norm_map += (self.gt_lbl == lbl) * (1.0 - log_cel_size / log_window_area)
         if self.config ["quality"]:
             self.new_lbl = np.zeros (self.size, dtype=np.int32)
             self.old_score = self.merge_quality () * self.split_quality () * self.cell_quality ()

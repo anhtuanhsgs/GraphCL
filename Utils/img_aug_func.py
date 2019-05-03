@@ -34,6 +34,8 @@ def lbl2rgb (lbl):
     lbl = np.array (lbl).reshape (original_shape + (3,))
     return lbl
 
+def color_generator (n):
+    
 
 def read_im (paths):
     ret = []
