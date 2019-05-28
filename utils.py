@@ -172,6 +172,7 @@ def get_data (path, args):
         X_train = X_train [0]
     if (len (y_train) > 0):
         y_train = y_train [0]
+        pass
         gt_prob = get_cell_prob (y_train, 0, 0)
         y_train = []
         for img in gt_prob:

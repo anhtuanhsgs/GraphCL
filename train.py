@@ -10,13 +10,14 @@ from torch.autograd import Variable
 from Utils.Logger import Logger
 
 import numpy as np
+import time
 
 def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
     ptitle('Training Agent: {}'.format(rank))
     print ('Start training agent: ', rank)
     
     if rank == 0:
-        logger = Logger (args.log_dir)
+        logger = Logger (args.log_dir [:-1] + '_losses/')
         train_step = 0
 
     gpu_id = args.gpu_ids[rank % len(args.gpu_ids)]
@@ -37,7 +38,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         if args.optimizer == 'Adam':
             optimizer = optim.Adam (shared_model.parameters (), lr=args.lr, amsgrad=args.amsgrad)
 
-    # env.seed (args.seed + rank)
+    env.seed (args.seed + rank)
     player = Agent (None, env, args, None)
     num_actions = 2
     if args.one_step:
@@ -55,6 +56,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.model = DilatedFCN_GRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif (args.model == "UNetGRU"):
         player.model = UNetGRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
+    elif (args.model == "DilatedUNet"):
+        player.model = DilatedUNet (env.observation_space.shape [0], args.features, num_actions)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -107,21 +110,21 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         elif "GRU" in args.model:
             player.hx = Variable (player.hx.data)
 
+        # curtime = time.time ()
         for step in range(args.num_steps):
-            if (rank % 8 == 0):
+            # if (env.rng.rand () < 0.25):
+            if rank < args.lbl_agents:
                 player.action_train (use_lbl=True) 
             else:
                 player.action_train () 
-            # player.action_train ()
 
             if rank == 0:
                 eps_reward = player.env.sum_reward.mean ()
             if player.done:
                 break
+        # print ("timelast: ", time.time () - curtime)
 
         if player.done:
-            # if rank == 0:
-            #     print ("----------------------------------------------")
             state = player.env.reset ()
             player.state = torch.from_numpy (state).float ()
             if gpu_id >= 0:
@@ -152,9 +155,6 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         R = Variable(R)
 
         for i in reversed(range(len(player.rewards))):
-            # if rank == 0:
-            #     plt.imshow (player.rewards[i][0][0])
-            #     plt.show ()
             if gpu_id >= 0:
                 with torch.cuda.device (gpu_id):
                     reward_i = torch.tensor (player.rewards [i]).cuda ()
@@ -168,7 +168,6 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                         player.values[i].data
 
             gae = gae * args.gamma * args.tau + delta_t
-            # print (player.rewards [i])
             policy_loss = policy_loss - \
                 (player.log_probs[i] * Variable(gae)).mean () - \
                 (0.05 * player.entropies[i]).mean ()
@@ -185,10 +184,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             train_step += 1
             if train_step % args.log_period == 0 and train_step > 0:
                 log_info = {
-                    # 'train: sum_loss': sum_loss, 
                     'train: value_loss': value_loss, 
                     'train: policy_loss': policy_loss, 
-                    # 'train: advanage': advantage,
                     'train: eps reward': pinned_eps_reward,
                 }
 

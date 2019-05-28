@@ -306,19 +306,59 @@ class UNetLstm (nn.Module):
 
 
 class DilatedModule (nn.Module):
-    def __init__ (self, in_ch, out_ch, factors=[1,2,4,8], bias=False):
+    def __init__ (self, in_ch, out_ch, depth, bias=False):
         super(DilatedModule, self).__init__()
-        self.dilconv0 = nn.Sequential (nn.Conv2d (in_ch, out_ch, kernel_size=3, dilation=factors[0], padding=1, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
-        self.dilconv1 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[1], padding=2, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
-        self.dilconv2 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[2], padding=4, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
-        self.dilconv3 = nn.Sequential (nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=factors[3], padding=8, bias=bias), nn.InstanceNorm2d (out_ch), nn.ELU ())
+        self.layers = nn.ModuleList ()
+        self.depth = depth
+        for i in range (depth):
+            self.layers.append (
+                nn.Sequential (
+                    nn.Conv2d (out_ch, out_ch, kernel_size=3, dilation=2**i, padding=2**i, bias=bias), 
+                    nn.InstanceNorm2d (out_ch), 
+                    nn.ELU ()))
+        self.last_layer = nn.Sequential (nn.InstanceNorm2d (out_ch), nn.ELU ())
 
     def forward (self, x):
-        x = self.dilconv0 (x)
-        x = self.dilconv1 (x)
-        x = self.dilconv2 (x)
-        x = self.dilconv3 (x)
-        return x
+        layer_rets = []
+        for layer in self.layers:
+            if len (layer_rets) > 0:
+                prevs_sum = torch.sum (torch.cat (layer_rets, 0), 0)
+                layer_ret = layer (prevs_sum)
+            else:
+                layer_ret = layer (x)
+            layer_rets.append (layer_ret [None])
+        return layer_rets [-1][0]
+
+class DilatedUNet (nn.Module):
+    def __init__(self, in_ch, features, out_ch):
+        super(DilatedUNet, self).__init__()
+        self.inc = inconv(in_ch, features [0])
+        self.down1 = UNet_down(features[0], features[1])
+        self.down2 = UNet_down(features[1], features[2])
+        self.down3 = UNet_down(features[2], features[3])
+        self.down4 = UNet_down(features[3], features[3])
+        self.dilated_module = DilatedModule (features[3], features[3], depth=4, bias=False)
+        self.up1 = UNet_up(features[3] * 2, features[2])
+        self.up2 = UNet_up(features[2] * 2, features[1])
+        self.up3 = UNet_up(features[1] * 2, features[0])
+        self.up4 = UNet_up(features[0] * 2, features[0])
+        self.actor = outconv(features [0], out_ch)
+        self.critic = outconv (features [0], 1)
+
+    def forward(self, x):
+        x1 = self.inc(x)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x4 = self.down3(x3)
+        x5 = self.down4(x4)
+        x = self.dilated_module (x5)
+        x = self.up1(x, x4)
+        x = self.up2(x, x3)
+        x = self.up3(x, x2)
+        x = self.up4(x, x1)
+        actor = self.actor (x)
+        critic = self.critic (x)
+        return critic, actor
 
 class DilatedFCN_GRU (nn.Module):
     def __init__ (self, in_size, features, out_ch, hidden_channels):
@@ -393,10 +433,15 @@ class UNetGRU (nn.Module):
         return critic, actor, hx
 
 if __name__ == "__main__":
-    # FEATURES = [16, 32, 64, 128]
+    FEATURES = [16, 32, 64, 128]
     # model = UNet (5, features=FEATURES, out_ch=2)
     # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
     # value, logit = model (x)
+
+    model = DilatedUNet (in_ch=5, features=FEATURES, out_ch=2)
+    x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    value, logit = model (x)
+    print (value.shape, logit.shape)
 
     # print (torch.rand ((1, 4, 4)))
     # # prob = prob.transpose (1, -1)
@@ -446,12 +491,12 @@ if __name__ == "__main__":
     # print (logit.shape)
     # print (hx.shape)
 
-    nhidden = 256
-    FEATURES = [8, 16, 32, 64]
-    model = UNetGRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
-    x = torch.zeros ((1,5,256,256), dtype=torch.float32)
-    hx = torch.zeros ((1, nhidden, 256, 256), dtype=torch.float32)
-    value, logit, hx = model ((x, hx))
-    print (value.shape)
-    print (logit.shape)
-    print (hx.shape)
+    # nhidden = 256
+    # FEATURES = [8, 16, 32, 64]
+    # model = UNetGRU ((5, 256, 256), FEATURES, 2, hidden_channels=nhidden)
+    # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
+    # hx = torch.zeros ((1, nhidden, 256, 256), dtype=torch.float32)
+    # value, logit, hx = model ((x, hx))
+    # print (value.shape)
+    # print (logit.shape)
+    # print (hx.shape)

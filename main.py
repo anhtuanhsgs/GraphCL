@@ -153,13 +153,43 @@ parser.add_argument (
 parser.add_argument (
     '--radius',
     type=int,
-    default=16,
+    default=[16, 48, 96],
+    nargs='+'
+)
+
+parser.add_argument (
+    '--merge_radius',
+    type=int,
+    default=[16, 48, 96],
+    nargs='+'
+)
+
+parser.add_argument (
+    '--split_radius',
+    type=int,
+    default=[16, 48, 96],
+    nargs='+'
 )
 
 parser.add_argument (
     '--speed',
     type=int,
-    default=2,
+    default=[1, 2, 4],
+    nargs='+'
+)
+
+parser.add_argument (
+    '--merge_speed',
+    type=int,
+    default=[1, 2, 4],
+    nargs='+'
+)
+
+parser.add_argument (
+    '--split_speed',
+    type=int,
+    default=[1, 2, 4],
+    nargs='+'
 )
 
 parser.add_argument (
@@ -179,7 +209,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU", "UNetGRU"]
+    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU", "UNetGRU", "DilatedUNet"]
 )
 
 parser.add_argument (
@@ -199,18 +229,6 @@ parser.add_argument (
 )
 
 parser.add_argument (
-    "--kernel-size",
-    type=int,
-    default=32
-)
-
-parser.add_argument (
-    "--kernel-step",
-    type=int,
-    default=16
-)
-
-parser.add_argument (
     "--one-step",
     type=int,
     default=None
@@ -218,7 +236,8 @@ parser.add_argument (
 
 parser.add_argument (
     '--downsample',
-    action="store_true"
+    type=int,
+    default=1
 )
 
 parser.add_argument (
@@ -227,13 +246,31 @@ parser.add_argument (
 )
 
 parser.add_argument (
-    '--quality',
+    '--DEBUG',
     action="store_true"
 )
 
 parser.add_argument (
-    '--DEBUG',
+    '--data',
+    default='snemi',
+    choices=['syn', 'snemi', 'voronoi']
+)
+
+parser.add_argument (
+    '--SEMI_DEBUG',
     action="store_true"
+)
+
+# parser.add_argument (
+#     '--lbl-action-ratio',
+#     type=float,
+#     default=0.125
+# )
+
+parser.add_argument (
+    '--lbl-agents',
+    type=int,
+    default=1
 )
 
 def setup_env_conf (args):
@@ -245,14 +282,15 @@ def setup_env_conf (args):
         "size": args.size,
         "num_segs": 12,
         "radius": args.radius,
+        "split_radius": args.split_radius,
+        "merge_radius": args.merge_radius,
         "speed": args.speed,
+        "merge_speed": args.merge_speed,
+        "split_speed": args.split_speed,
         "reward": args.reward,
         "use_lbl": args.use_lbl,
         "use_masks": args.use_masks,
-        "ker_size": args.kernel_size,
-        "ker_step": args.kernel_step,
         "cell_norm": args.cell_norm,
-        "quality": args.quality,
         "DEBUG": args.DEBUG,
     }
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
@@ -262,6 +300,8 @@ def setup_env_conf (args):
         args.env += "_GRU"
     if "Lstm" in args.model:
         args.env += "_lstm"
+    if "Dilated" in args.model:
+        args.env += "_dilated"
     if args.use_lbl:
         args.env += "_lbl"
         # env_conf ["observation_shape"][0] = env_conf ["T"] + 2 + 1 
@@ -277,13 +317,25 @@ def setup_env_conf (args):
     create_dir (args.save_model_dir)
     return env_conf
  
-def setup_data (env_conf):
-    raw , gt_lbl = get_data (path='Data/train/', args=None)
-    raw = raw 
-    gt_lbl = gt_lbl
-    if (env_conf ["DEBUG"]):
-        raw = raw[:1]
-        gt_lbl = gt_lbl [:1]
+def setup_data (args):
+    if args.data == 'syn':
+        path = 'Data/syn/'
+    if args.data == 'snemi':
+        path = 'Data/train/'
+    if args.DEBUG:
+        raw , gt_lbl = get_data (path=path, args=None)
+    else:
+        raw , gt_lbl = get_data (path=path, args=None)
+
+    print (raw.shape, gt_lbl.shape)
+    if (args.DEBUG):
+        size = args.size [0] * args.downsample
+        raw = raw[:1,:size,:size]
+        gt_lbl = gt_lbl [:1,:size,:size]
+    if (args.SEMI_DEBUG):
+        size = args.size [0] * args.downsample
+        raw = raw[:3]
+        gt_lbl = gt_lbl [:3]
     return raw, gt_lbl
 
 if __name__ == '__main__':
@@ -298,10 +350,11 @@ if __name__ == '__main__':
     env_conf = setup_env_conf (args)
 
     if "EM_env" in args.env:
-        raw, gt_lbl = setup_data (env_conf)
+        raw, gt_lbl = setup_data (args)
+        ds = args.downsample
         if args.downsample:
-            raw = raw [:, ::2, ::2]
-            gt_lbl = gt_lbl [:, ::2, ::2]
+            raw = raw [:, ::ds, ::ds]
+            gt_lbl = gt_lbl [:, ::ds, ::ds]
 
     num_actions = 2
     if args.one_step:
@@ -319,6 +372,8 @@ if __name__ == '__main__':
         shared_model = DilatedFCN_GRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
     elif (args.model == "UNetGRU"):
         shared_model = UNetGRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
+    elif (args.model == "DilatedUNet"): 
+        shared_model = DilatedUNet (env_conf ["observation_shape"][0], args.features, num_actions)
 
     if args.load:
         saved_state = torch.load(
@@ -353,7 +408,6 @@ if __name__ == '__main__':
     #     processes.append(p)
     #     time.sleep(1)
 
-    # for rank in range(0, 1):
     for rank in range(0, args.workers):
         if "EM_env" in args.env:
             p = mp.Process(

@@ -37,6 +37,12 @@ class Agent (object):
 
         for val in val_list:
             single_cell_map = lbl == val
+
+            #DEBUG
+            # if val == 0:
+            #     continue
+            ###############
+
             # pixels_list = np.where (single_cell_map)
             # rand_index = self.env.rng.randint (len (pixels_list [0]))
             # color_val = action [pixels_list [0][rand_index], pixels_list [1][rand_index]]
@@ -50,6 +56,10 @@ class Agent (object):
             sample = self.env.rng.rand ()
             if (sample < ratio):
                 ret += single_cell_map
+
+            #DEBUG
+            # if sample >= ratio:
+            #     ret += single_cell_map
         
         self.action = ret
         ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)

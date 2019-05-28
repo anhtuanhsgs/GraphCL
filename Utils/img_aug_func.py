@@ -16,26 +16,41 @@ from random import shuffle
 
 import colorsys
 
-N = 84
-HSV_tuples = [(x*1.0/N, 0.5, 0.5) for x in range(N)]
-RGB_tuples = list (map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples))
+# N = 84
+# HSV_tuples = [(x*1.0/N, 0.5, 0.5) for x in range(N)]
+# RGB_tuples = list (map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples))
 
-COLOR_LIST = [(int (rgb[0] * 255), int (rgb[1] * 255), int (rgb[2] * 255)) for rgb in RGB_tuples]
-shuffle (COLOR_LIST)
-COLOR_LIST [0] = (0, 0, 0)
+# COLOR_LIST = [(int (rgb[0] * 255), int (rgb[1] * 255), int (rgb[2] * 255)) for rgb in RGB_tuples]
+# shuffle (COLOR_LIST)
+# COLOR_LIST [0] = (0, 0, 0)
 
-def index2rgb (index):
-    return COLOR_LIST[index]
+# def index2rgb (index):
+#     return COLOR_LIST[index]
 
-def lbl2rgb (lbl):
-    original_shape = np.squeeze (lbl).shape
-    lbl = lbl.flatten ().tolist ()
-    lbl = list (map (index2rgb, lbl))
-    lbl = np.array (lbl).reshape (original_shape + (3,))
-    return lbl
+# def lbl2rgb (lbl):
+#     original_shape = np.squeeze (lbl).shape
+#     lbl = lbl.flatten ().tolist ()
+#     lbl = list (map (index2rgb, lbl))
+#     lbl = np.array (lbl).reshape (original_shape + (3,))
+#     return lbl
 
-def color_generator (n):
-    
+def color_generator (N):
+    HSV_tuples = [(x*1.0/N, 0.5, 0.5) for x in range(N)]
+    RGB_tuples = list (map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples))
+
+    COLOR_LIST = [(int (rgb[0] * 255), int (rgb[1] * 255), int (rgb[2] * 255)) for rgb in RGB_tuples]
+    # shuffle (COLOR_LIST)
+    COLOR_LIST [0] = (0, 0, 0)
+
+    def index2rgb (index):
+        return COLOR_LIST [index]
+    def lbl2rgb (lbl):
+        original_shape = np.squeeze (lbl).shape
+        lbl = lbl.flatten ().tolist ()
+        lbl = list (map (index2rgb, lbl))
+        lbl = np.array (lbl).reshape (original_shape + (3,))
+        return lbl
+    return lbl2rgb
 
 def read_im (paths):
     ret = []

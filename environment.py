@@ -19,13 +19,18 @@ from PIL import Image, ImageFilter
 from utils import guassian_weight_map, density_map, malis_rand_index, malis_f1_score, adjusted_rand_index
 from skimage.draw import line_aa
 from misc.Voronoi import *
-
+import time
+# python main.py --env EM_env_DEBUG_34 --gpu-id 0 1 2 3 4 5 6 7 --workers 16 --lbl-agents 3 \--num-steps 5 --max-episode-length 5 --reward normal --model DilatedUNet --merge_radius 32 --merge_speed 1 --split_radius 64 --split_speed 2  --use-lbl --size 128 128 --hidden-feat 32  --log-period 10 --features 32 64 128 256 --downsample 2 --data snemi
 debug = True
 
 class General_env (gym.Env):
     def init (self, config):
         self.T = config ['T']
         self.r = config ["radius"]
+        self.merge_radius = config ["merge_radius"]
+        self.split_radius = config ["split_radius"]
+        self.merge_speed = config ["merge_speed"]
+        self.split_speed = config ["split_speed"]
         self.size = config ["size"]
         self.speed = config ["speed"]
         if config ["use_lbl"]:
@@ -33,45 +38,84 @@ class General_env (gym.Env):
         else:
             self.observation_space = Box (-1.0, 1.0, shape=[config["observation_shape"][0]] + self.size, dtype=np.float32)
         self.rng = np.random.RandomState(time_seed ())
-        self.max_lbl = 2 ** self.T - 1
+        self.max_lbl = 2 ** self .T - 1
+        self.pred_lbl2rgb = color_generator (self.max_lbl + 1)
+        self.gt_lbl2rgb = color_generator (111)
+
+    def seed (self, seed):
+        self.rng = np.random.RandomState(seed)
 
     def step (self, action):
         self.action = action
         self.new_lbl = self.lbl + action * (2 ** (self.T - self.step_cnt - 1))
         done = False
 
-        reward = np.zeros (self.size, dtype=np.float32)
-        reward = self.middle_step_reward (density=self.density)  
-                
-        self.lbl = self.new_lbl
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
-
-        reward += self.foregr_backgr_reward () / self.T
-        if self.step_cnt == 0:
-            reward += self.first_step_reward () * 0.2
-
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
 
+        #DEBUG
+        # tmp = self.lbl
+        # self.lbl = self.new_lbl
+        # self.observation ()
+        # self.lbl = tmp
+        ###########################
+
+        reward = np.zeros (self.size, dtype=np.float32)
+
+        #Reward
+        reward += self.foreground_reward (self.step_cnt>=self.T)
+        reward += self.background_reward (self.step_cnt>=self.T)
+        #Reward
+        split_reward = np.zeros (self.size, dtype=np.float32)
+        # for i in range (len (self.r)):
+        #     radius = self.r[i]
+        #     speed = self.speed [i]
+        #     split_reward += self.split_reward (density=self.density, radius=radius, speed=speed)
+
+        for i in range (len (self.split_radius)):
+            radius = self.split_radius[i]
+            speed = self.split_speed [i]
+            split_reward += self.split_reward (density=self.density, radius=radius, speed=speed, last_step=(self.step_cnt>=self.T))
+        reward += split_reward
+
+        #DEBUG
+        # self.debug_img = np.concatenate ([self.debug_img, split_reward * 255], 1)
+
+        self.lbl = self.new_lbl
+        
+        #Reward
+        # reward += self.foregr_backgr_reward () / self.T 
+
         self.step_cnt += 1
         info = {}
-        if self.config ["quality"]:
-            current_score = self.merge_quality () * self.split_quality () * self.cell_quality ()
-            reward = current_score - self.old_score
-            self.old_score = current_score
 
+        merge_reward = np.zeros (self.size, dtype=np.float32)
+        for i in range (len (self.merge_radius)):
+            radius = self.merge_radius[i]
+            speed = self.merge_speed [i]
+            merge_reward += self.merge_reward (density=self.density, radius=radius, speed=speed, last_step=(self.step_cnt>=self.T))
+        reward += merge_reward
+
+        # self.debug_img = np.concatenate ([self.debug_img, merge_reward * 255], 1)
+        # plt.imshow (self.debug_img)
+        # plt.show ()
+
+        #Reward
         if self.step_cnt >= self.T:
             done = True
-            # reward += self.merge_quality () * self.split_quality ()
-            # reward += self.foregr_backgr_reward () * 0.2
-            reward += self.final_step_reward (density=self.density, last_step=(self.step_cnt>=self.T)) 
 
-        if self.config ["cell_norm"]:
-            reward = reward * self.norm_map
+        #Reward
+        # if self.config ["cell_norm"]:
+        #     reward = reward * self.norm_map
         self.rewards.append (reward)    
         self.sum_reward += reward
 
-        return self.observation (), reward, done, info
+        ret = (self.observation (), reward, done, info)
+        return ret
+
+    def unique (self):
+        return np.unique (self.lbl, return_counts=True)
 
     def shuffle_lbl (self, lbl):
         per = list (range (1, np.max (lbl) + 1))
@@ -90,21 +134,15 @@ class General_env (gym.Env):
             self.density = density_map (self.gt_lbl)
         else:
             self.density = np.ones (self.size, dtype=np.float32)
-        if self.config ["cell_norm"]:
-            self.norm_map = np.zeros (self.size, dtype=np.float32)
-            for lbl in np.unique (self.gt_lbl):
-                cell_size = np.count_nonzero (self.gt_lbl == lbl)
-                window_area =  self.size[0] * self.size[1]
-                log_window_area = np.log (window_area)
-                log_cel_size = np.log (cell_size)
-                self.norm_map += (self.gt_lbl == lbl) * (1.0 - min (cell_size * 2.5, window_area * 0.8) / window_area)
+        # if self.config ["cell_norm"]:
+        #     self.norm_map = np.zeros (self.size, dtype=np.float32)
+        #     for lbl in np.unique (self.gt_lbl):
+        #         cell_size = np.count_nonzero (self.gt_lbl == lbl)
+        #         window_area =  self.size[0] * self.size[1]
+        #         log_window_area = np.log (window_area)
+        #         log_cel_size = np.log (cell_size)
+        #         self.norm_map += (self.gt_lbl == lbl) * (1.0 - min (cell_size * 2.5, window_area * 0.8) / window_area)
                 # self.norm_map += (self.gt_lbl == lbl) * (1.0 - log_cel_size / log_window_area)
-        if self.config ["quality"]:
-            self.new_lbl = np.zeros (self.size, dtype=np.int32)
-            self.old_score = self.merge_quality () * self.split_quality () * self.cell_quality ()
-            # print ("old_score")
-            # plt.imshow (self.old_score)
-            # plt.show ()
 
     def get_I (self, lbl_cp, new_lbl_cp, yr, xr, r):
         y_base = r + yr; x_base = r + xr
@@ -119,63 +157,74 @@ class General_env (gym.Env):
             ret.append (arr.astype (np.float32))
         return ret
 
-    def merge_quality (self):
-        # Based on IOU
-        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
-        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
-        ret = np.zeros (self.size, dtype=np.float32)
-        r = self.r
-        intersection = np.zeros (self.size, dtype=np.float32)
-        union = np.zeros (self.size, dtype=np.float32)
-        for yr in range (-r, r + 1, self.speed):
-            for xr in range (-r, r + 1, self.speed):
+
+    def split_reward (self, radius, speed, density=None, last_step=False):
+        lbl_cp = np.pad (self.lbl, radius, 'constant', constant_values=0)
+        new_lbl_cp = np.pad (self.new_lbl, radius, 'constant', constant_values=0)
+        self.gt_lbl_cp = np.pad (self.gt_lbl, radius, 'constant', constant_values=0)
+        density_cp = np.pad (self.density, radius, 'constant', constant_values=0)
+        reward = np.zeros (self.size, dtype=np.float32)
+        r = radius
+        I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
+        I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
+        true_split_reward = np.zeros (self.size, dtype=np.float32)
+        false_split_penalty = np.zeros (self.size, dtype=np.float32)
+        false_merge_penalty = np.zeros (self.size, dtype=np.float32)
+
+        first_step = self.step_cnt == 0
+        for yr in range (-r, r + 1, speed):
+            for xr in range (-r, r + 1, speed):
                 if (yr == 0 and xr == 0):
                     continue
                 y_base = r + yr; x_base = r + xr
                 I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                intersection += (I_hat == True) & (I == True)
-                union += ((I_hat == True) | (I == True))
-        union += 1
-        ret = intersection / union
-        return ret
+                density_v = density_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
+                gt_lbl_v = self.gt_lbl_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
+                density_u = density
+                I_hat_true_cnt += density_v * (I_hat == True) * (self.gt_lbl != 0) * (gt_lbl_v != 0)
+                I_hat_false_cnt += density_v * (I_hat == False) * (self.gt_lbl != 0) * (gt_lbl_v != 0)
+                true_split_reward += density_u * ((I_hat == False) & (I == False) & ((I_old == True) | first_step)) * density_v * (self.gt_lbl != 0) * (gt_lbl_v != 0)
+                false_merge_penalty += density_u * ((I_hat == False) & (I == True)) * density_v * (gt_lbl_v != 0) * (self.gt_lbl != 0)
 
-    def split_quality (self):
-        # Based on IOU
-        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
-        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
-        ret = np.zeros (self.size, dtype=np.float32)
-        r = self.r
-        intersection = np.zeros (self.size, dtype=np.float32)
-        union = np.zeros (self.size, dtype=np.float32)
-        for yr in range (-r, r + 1, self.speed):
-            for xr in range (-r, r + 1, self.speed):
+        # print (64 * 64 - np.count_nonzero (self.new_lbl[::2, ::2]))
+        # plt.imshow (true_split_reward, cmap='gray')
+        # plt.show ()
+        # if last_step:
+        reward -= (false_merge_penalty / (I_hat_false_cnt + 1)) / self.T
+        reward += true_split_reward / (I_hat_false_cnt + 1)
+        return reward
+
+    def merge_reward (self, radius, speed, density=None, last_step=False):
+        lbl_cp = np.pad (self.lbl, radius, 'constant', constant_values=0)
+        new_lbl_cp = np.pad (self.new_lbl, radius, 'constant', constant_values=0)
+        self.gt_lbl_cp = np.pad (self.gt_lbl, radius, 'constant', constant_values=0)
+        density_cp = np.pad (self.density, radius, 'constant', constant_values=0)
+        reward = np.zeros (self.size, dtype=np.float32)
+        r = radius
+        I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
+        I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
+        true_merge_reward = np.zeros (self.size, dtype=np.float32)
+        false_merge_penalty = np.zeros (self.size, dtype=np.float32)
+        false_split_penalty = np.zeros (self.size, dtype=np.float32)
+
+        first_step = self.step_cnt == 0
+        for yr in range (-r, r + 1, speed):
+            for xr in range (-r, r + 1, speed):
                 if (yr == 0 and xr == 0):
                     continue
                 y_base = r + yr; x_base = r + xr
                 I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                intersection += (I_hat == False) & (I == False)
-                union += ((I_hat == False) | (I == False))
-        union += 1
-        ret = intersection / union
-        return ret
-
-    def cell_quality (self):
-        new_lbl = self.new_lbl
-        gt_lbl = self.gt_lbl
-        ret = np.zeros (self.size, dtype=np.float32)
-        gt_lbl_values = np.unique (gt_lbl)
-        lbl_values = np.unique (new_lbl)
-        #Union
-        for gt_value in gt_lbl_values:
-            single_cell_map = gt_lbl == gt_value
-            for value in lbl_values:
-                value_map = value == new_lbl
-                intersection = single_cell_map * (value_map * np.sum (value_map * single_cell_map))
-                union = np.sum (single_cell_map | value_map) + 1
-                ret += intersection / union
-        return ret
+                gt_lbl_v = self.gt_lbl_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
+                density_v = density_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
+                density_u = density
+                I_hat_true_cnt += density_v * (I_hat == True) * (gt_lbl_v != 0) * (self.gt_lbl != 0)
+                I_hat_false_cnt += density_v * (I_hat == False) * (gt_lbl_v != 0) * (self.gt_lbl != 0)
+                true_merge_reward += density_u * ((I_hat == True) & (I == True)) * density_v * (gt_lbl_v != 0) * (self.gt_lbl != 0)
+                false_split_penalty += density_u * ((I_hat == True) & (I == False) & ((I_old == True) | first_step)) * density_v * (self.gt_lbl != 0) * (gt_lbl_v != 0)
+                
+        reward -= false_split_penalty / (I_hat_true_cnt + 1)
+        reward += (true_merge_reward / (I_hat_true_cnt + 1)) / self.T
+        return reward
 
     def first_step_reward (self, density=None):
         reward = np.zeros (self.size, dtype=np.float32)
@@ -186,155 +235,63 @@ class General_env (gym.Env):
         reward -= ((self.new_lbl != 0) & (self.gt_lbl == 0)) * (foregr_ratio)
         return reward
 
-    def middle_step_reward (self, density=None):
-        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
-        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
-        density_cp = np.pad (self.density, self.r, 'constant', constant_values=0)
-        reward = np.zeros (self.size, dtype=np.float32)
-        r = self.r
-        I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
-        I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
-        true_split_reward = np.zeros (self.size, dtype=np.float32)
-        false_split_penalty = np.zeros (self.size, dtype=np.float32)
-        first_step = self.step_cnt == 0
-        for yr in range (-r, r + 1, self.speed):
-            for xr in range (-r, r + 1, self.speed):
-                if (yr == 0 and xr == 0):
-                    continue
-                y_base = r + yr; x_base = r + xr
-                I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                density_v = density_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
-                density_u = density
-                I_hat_true_cnt += density_v * (I_hat == True)
-                I_hat_false_cnt += density_v * (I_hat == False)
-                true_split_reward += density_u * ((I_hat == False) & (I == False) & ((I_old == True) | first_step)) * density_v
-                false_split_penalty += density_u * ((I_hat == True) & (I == False) & ((I_old == True) | first_step)) * density_v
-
-        I_hat_false_cnt += (I_hat_false_cnt == 0)
-        I_hat_true_cnt += (I_hat_true_cnt == 0)
-        reward += true_split_reward / I_hat_false_cnt
-        reward -= false_split_penalty / I_hat_true_cnt
-        return reward
-
-    def final_step_reward (self, density=None, last_step=False):
-        lbl_cp = np.pad (self.lbl, self.r, 'constant', constant_values=0)
-        new_lbl_cp = np.pad (self.new_lbl, self.r, 'constant', constant_values=0)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
-        density_cp = np.pad (self.density, self.r, 'constant', constant_values=0)
-        reward = np.zeros (self.size, dtype=np.float32)
-        r = self.r
-        I_hat_true_cnt = np.zeros (self.size, dtype=np.float32)
-        I_hat_false_cnt = np.zeros (self.size, dtype=np.float32)
-        true_merge_reward = np.zeros (self.size, dtype=np.float32)
-        false_merge_penalty = np.zeros (self.size, dtype=np.float32)
-
-        for yr in range (-r, r + 1, self.speed):
-            for xr in range (-r, r + 1, self.speed):
-                if (yr == 0 and xr == 0):
-                    continue
-                y_base = r + yr; x_base = r + xr
-                I, I_hat, I_old = self.get_I (lbl_cp, new_lbl_cp, yr, xr, r)
-                density_v = density_cp [y_base:y_base+self.size[0], x_base:x_base+self.size[1]]
-                density_u = density
-                I_hat_true_cnt += density_v * (I_hat == True)
-                I_hat_false_cnt += density_v * (I_hat == False)
-                true_merge_reward += density_u * ((I_hat == True) & (I == True)) * density_v
-                false_merge_penalty += density_u * ((I_hat == False) & (I == True)) * density_v
-        
-        I_hat_false_cnt += (I_hat_false_cnt == 0)
-        I_hat_true_cnt += (I_hat_true_cnt == 0)
-        reward -= (false_merge_penalty / I_hat_false_cnt)
-        reward += true_merge_reward / I_hat_true_cnt
-        return reward
-
-    def calculate_reward_step_kernel (self):
-        size = self.config["ker_size"]
-        step = self.config["ker_step"]
-        full_size = self.size
-        y0 = 0; endY = False
-        x0 = 0; endX = False
-        reward = np.zeros (self.size, dtype=np.float32)
-        cnt = np.zeros (self.size, dtype=np.float32)
-        while y0 < full_size [0]:
-            if y0 + size >= full_size [0]:
-                y0 = full_size [0] - size
-                endY = True
-            while x0 < full_size [1]:
-                if x0 + size >= full_size [1]:
-                    x0 = full_size [1] - size
-                    endX = True
-                patch_lbl = self.lbl [y0:y0+size, x0:x0+size].astype (np.int32)
-                patch_new_lbl = self.new_lbl [y0:y0+size, x0:x0+size].astype (np.int32)
-                patch_gt_lbl = self.gt_lbl [y0:y0+size, x0:x0+size].astype (np.int32)
-                old_score = adjusted_rand_index (patch_gt_lbl, patch_lbl)
-                score = adjusted_rand_index (patch_gt_lbl, patch_new_lbl)
-                cnt [y0:y0+size, x0:x0+size] += 1
-                reward [y0:y0+size, x0:x0+size] += score - old_score
-                x0 += step
-                if endX:
-                    x0 = 0; endX = False
-                    break
-            y0 += step
-            if endY:
-                break
-
-        reward = reward / cnt
-        return reward
-
     def foregr_backgr_reward (self):
         reward = np.zeros (self.size, dtype=np.float32)
         # foregr_ratio = np.count_nonzero (self.gt_lbl) / np.prod (self.gt_lbl.shape)
         foregr_ratio = 0.67
         # backgr reward, penalty
-        reward += ((self.lbl == 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
-        reward -= ((self.lbl != 0) & (self.gt_lbl == 0)).astype (np.float32) * foregr_ratio
+        reward += ((self.lbl == 0) & (self.gt_lbl == 0)) * foregr_ratio
+        reward -= ((self.lbl != 0) & (self.gt_lbl == 0)) * foregr_ratio
         # foregr reward, penalty
-        reward += ((self.lbl != 0) & (self.gt_lbl != 0)).astype (np.float32) * (1 - foregr_ratio)
-        reward -= ((self.lbl == 0) & (self.gt_lbl != 0)).astype (np.float32) * (1 - foregr_ratio)
+        reward += ((self.lbl != 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
+        reward -= ((self.lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
+        return reward
+
+    def background_reward (self, last_step):
+        reward = np.zeros (self.size, dtype=np.float32)
+        foregr_ratio = 0.67
+        if last_step:
+            reward += ((self.new_lbl == 0) & (self.gt_lbl == 0)) * foregr_ratio
+        reward -= ((self.new_lbl != 0) & (self.lbl == 0) & (self.gt_lbl == 0)) * foregr_ratio
+        return reward   
+    
+    def foreground_reward (self, last_step):
+        reward = np.zeros (self.size, dtype=np.float32)
+        foregr_ratio = 0.67
+        reward += ((self.new_lbl != 0) & (self.lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
+        if last_step:
+            reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
         return reward
 
     def observation (self):
-        if not self.config ["use_lbl"]:
-            
-            obs = np.concatenate ([
-                    self.raw [None] * 2 - 255.0,
-                    self.mask,
-                ], 0)
+        lbl = self.lbl / self.max_lbl * 255.0
+        done_mask = np.zeros_like (self.raw)
+        if self.step_cnt >= self.T:
+            done_mask += 255.0
 
-        else:
-            lbl = self.lbl / self.max_lbl * 255.0
-            done_mask = np.zeros_like (self.raw)
-            if self.step_cnt >= self.T:
-                done_mask += 255.0
-
-
-            if self.config ["use_masks"]:
-                obs = np.concatenate ([
-                        self.raw [None].astype (np.float32),
-                        lbl [None], 
-                        done_mask [None],
-                        (self.mask + 255.0) / 2
-                    ])
-            else:
-                obs = np.concatenate ([
-                        self.raw [None].astype (np.float32),
-                        lbl [None], 
-                        done_mask [None],
-                        # (self.mask + 255.0) / 2
-                    ])
-        if self.obs_format == "CHW":
-            ret = obs.astype (np.float32) / 255.0
-        else:
-            ret = np.transpose (obs, [1, 2, 0]) / 255.0
-        return ret
+        obs = [self.raw [None].astype (np.float32), done_mask [None]]
+        if self.config ["use_lbl"]:
+            obs.append (lbl [None])
+        if self.config ["use_masks"]:
+            obs.append (self.mask)
+        obs = np.concatenate (obs, 0)
+        
+        # tmps = []
+        # for tmp in range (len (obs)):
+        #     tmps += [obs[tmp]]
+        # tmp = np.concatenate (tmps, 1)
+        # self.debug_img = tmp
+        
+        return obs
 
     def render (self):
         raw = np.repeat (np.expand_dims (self.raw, -1), 3, -1).astype (np.uint8)
         lbl = self.lbl.astype (np.int32)
 
-        lbl = lbl2rgb (lbl)
-        gt_lbl = lbl2rgb (self.gt_lbl)
+        lbl = self.pred_lbl2rgb (lbl)
+        gt_lbl = self.gt_lbl % 111
+        gt_lbl += ((gt_lbl == 0) & (self.gt_lbl != 0))
+        gt_lbl = self.gt_lbl2rgb (gt_lbl)
         
         masks = []
         for i in range (self.T):
@@ -426,9 +383,9 @@ class EM_env (General_env):
             self.gt_lbl = np.zeros_like (self.raw)
 
         self.raw, self.gt_lbl = self.random_crop (self.size, [self.raw, self.gt_lbl])
-        self.gt_lbl = label (self.gt_lbl > 0, connectivity=1).astype (np.int32)
-        self.gt_lbl = self.shuffle_lbl (self.gt_lbl)
-        self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
+        # self.gt_lbl = label (self.gt_lbl > 0, connectivity=1).astype (np.int32)
+        # self.gt_lbl = self.shuffle_lbl (self.gt_lbl)
+        # self.gt_lbl_cp = np.pad (self.gt_lbl, self.r, 'constant', constant_values=0)
         self.mask = np.zeros ([self.T] + self.size, dtype=np.float32)
         self.lbl = np.zeros (self.size, dtype=np.int32)
         self.sum_reward = np.zeros (self.size, dtype=np.float32)
