@@ -69,6 +69,10 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
         player.model = UNetGRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif (args.model == "DilatedUNet"):                 
         player.model = DilatedUNet (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "UNetEX"):
+        player.model = UNetEX (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "UNetFuse"):
+        player.model = UNetFuse (env.observation_space.shape [0], args.features, num_actions)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -144,10 +148,21 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
                     print ("------------------------------------------------")
 
                 log_img = np.concatenate (renderlist, 0)
+
                 if hasLbl:
                     log_info = {"valid_sample": log_img}
                 else:
                     log_info = {"test_sample": log_img}
+
+                if "EX" in args.model:
+                    cell_probs = []
+                    for cell_prob in player.cell_probs:
+                        cell_prob = cell_prob.data.cpu ().numpy () [0][0]
+                        cell_prob = np.repeat (np.expand_dims (cell_prob, -1), 3, -1) * 255
+                        cell_prob = cell_prob.astype (np.uint8) 
+                        cell_probs.append (cell_prob)
+                    cell_probs = np.concatenate (cell_probs, 1)
+                    log_info ["cell_probs"] = cell_probs
 
                 for tag, img in log_info.items ():
                     img = img [None]

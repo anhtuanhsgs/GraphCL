@@ -209,7 +209,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU", "UNetGRU", "DilatedUNet"]
+    choices=['UNet', 'FusionNetLstm', "FusionNet", "UNetLstm", "FCN_GRU", "UNetGRU", "DilatedUNet", "UNetEX", "UNetFuse"]
 )
 
 parser.add_argument (
@@ -253,13 +253,14 @@ parser.add_argument (
 parser.add_argument (
     '--data',
     default='snemi',
-    choices=['syn', 'snemi', 'voronoi']
+    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018']
 )
 
 parser.add_argument (
     '--SEMI_DEBUG',
     action="store_true"
 )
+
 
 # parser.add_argument (
 #     '--lbl-action-ratio',
@@ -296,12 +297,13 @@ def setup_env_conf (args):
     env_conf ["observation_shape"] = [env_conf ["T"] + 1] + env_conf ["size"]
     if args.one_step:
         env_conf ["max_lbl"] = args.one_step
-    if "GRU" in args.model:
-        args.env += "_GRU"
-    if "Lstm" in args.model:
-        args.env += "_lstm"
-    if "Dilated" in args.model:
-        args.env += "_dilated"
+    args.env += "_" + args.model
+    # if "GRU" in args.model:
+    #     args.env += "_GRU"
+    # if "Lstm" in args.model:
+    #     args.env += "_lstm"
+    # if "Dilated" in args.model:
+    #     args.env += "_dilated"
     if args.use_lbl:
         args.env += "_lbl"
         # env_conf ["observation_shape"][0] = env_conf ["T"] + 2 + 1 
@@ -319,13 +321,24 @@ def setup_env_conf (args):
  
 def setup_data (args):
     if args.data == 'syn':
-        path = 'Data/syn/'
+        path_train = 'Data/syn/'
+        path_valid = 'Data/syn/'
     if args.data == 'snemi':
-        path = 'Data/train/'
-    if args.DEBUG:
-        raw , gt_lbl = get_data (path=path, args=None)
-    else:
-        raw , gt_lbl = get_data (path=path, args=None)
+        path_train = 'Data/train/'
+        path_valid = 'Data/train/'
+    if args.data == "zebrafish":
+        path_train = "Data/Zebrafish/train/"
+        path_valid = "Data/Zebrafish/valid/"
+    if args.data == "cvppp":
+        path_train = "Data/CVPPP_Challenge/train/"
+        path_valid = "Data/CVPPP_Challenge/valid/"
+    if args.data == 'sb2018':
+        path_train = "Data/ScienceBowl2018/train/"
+        path_valid = "Data/ScienceBowl2018/train/"
+
+    relabel = args.data not in ['cvppp', 'sb2018']
+    raw, gt_lbl = get_data (path=path_train, relabel=relabel)
+    raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)
 
     print (raw.shape, gt_lbl.shape)
     if (args.DEBUG):
@@ -336,7 +349,7 @@ def setup_data (args):
         size = args.size [0] * args.downsample
         raw = raw[:3]
         gt_lbl = gt_lbl [:3]
-    return raw, gt_lbl
+    return raw, gt_lbl, raw_valid, gt_lbl_valid
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -350,11 +363,14 @@ if __name__ == '__main__':
     env_conf = setup_env_conf (args)
 
     if "EM_env" in args.env:
-        raw, gt_lbl = setup_data (args)
+        raw, gt_lbl, raw_valid, gt_lbl_valid = setup_data (args)
         ds = args.downsample
+
         if args.downsample:
             raw = raw [:, ::ds, ::ds]
             gt_lbl = gt_lbl [:, ::ds, ::ds]
+            raw_valid = raw_valid [:, ::ds, ::ds]
+            gt_lbl_valid = gt_lbl_valid [:, ::ds, ::ds]
 
     num_actions = 2
     if args.one_step:
@@ -374,6 +390,10 @@ if __name__ == '__main__':
         shared_model = UNetGRU (env_conf ["observation_shape"], args.features, num_actions, args.hidden_feat)
     elif (args.model == "DilatedUNet"): 
         shared_model = DilatedUNet (env_conf ["observation_shape"][0], args.features, num_actions)
+    elif (args.model == "UNetEX"):
+        shared_model = UNetEX (env_conf ["observation_shape"][0], args.features, num_actions)
+    elif (args.model == "UNetFuse"):
+        shared_model = UNetFuse (env_conf ["observation_shape"][0], args.features, num_actions)
 
     if args.load:
         saved_state = torch.load(
@@ -392,14 +412,14 @@ if __name__ == '__main__':
     else:
         optimizer = None
 
-    processes = []
-    if "EM_env" in args.env:
-        p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw, gt_lbl], True))
-    else:
-        p = mp.Process(target=test, args=(args, shared_model, env_conf))
-    p.start()
-    processes.append(p)
-    time.sleep(0.1)
+    # processes = []
+    # if "EM_env" in args.env:
+    #     p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw_valid, gt_lbl_valid], True))
+    # else:
+    #     p = mp.Process(target=test, args=(args, shared_model, env_conf))
+    # p.start()
+    # processes.append(p)
+    # time.sleep(0.1)
 
     # if "EM_env" in args.env:
     #     p = mp.Process(target=test, args=(args, shared_model, env_conf, 

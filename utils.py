@@ -162,22 +162,27 @@ def get_cell_prob (lbl, dilation, erosion):
             cell_prob [i] = binary_dilation (cell_prob [i])
     return np.array (cell_prob, dtype=np.uint8) * 255
 
-def get_data (path, args):
+def get_data (path, relabel):
     train_path = natsorted (glob.glob(path + 'A/*.tif'))
     train_label_path = natsorted (glob.glob(path + 'B/*.tif'))
     X_train = read_im (train_path)
     y_train = read_im (train_label_path)
-
     if (len (X_train) > 0):
         X_train = X_train [0]
     if (len (y_train) > 0):
-        y_train = y_train [0]
-        pass
-        gt_prob = get_cell_prob (y_train, 0, 0)
-        y_train = []
-        for img in gt_prob:
-            y_train += [label (img).astype (np.int32)]
-        y_train = np.array (y_train)
+        if (relabel):
+            y_train = y_train [0]
+
+            gt_prob = get_cell_prob (y_train, 0, 0)
+            y_train = []
+            for img in gt_prob:
+                if relabel:
+                    y_train += [label (img).astype (np.int32)]
+                else:
+                    y_train += [img]
+            y_train = np.array (y_train)
+        else:
+            y_train = y_train [0]
     else:
         y_train = np.zeros_like (X_train)
     return X_train, y_train

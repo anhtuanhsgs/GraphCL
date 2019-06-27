@@ -10,6 +10,7 @@ from cv2 import resize
 from Utils.utils import *
 from Utils.img_aug_func import *
 import albumentations as A
+import cv2
 import random
 from gym.spaces import Box, Discrete, Tuple
 import matplotlib.pyplot as plt
@@ -20,7 +21,7 @@ from utils import guassian_weight_map, density_map, malis_rand_index, malis_f1_s
 from skimage.draw import line_aa
 from misc.Voronoi import *
 import time
-# python main.py --env EM_env_DEBUG_34 --gpu-id 0 1 2 3 4 5 6 7 --workers 16 --lbl-agents 3 \--num-steps 5 --max-episode-length 5 --reward normal --model DilatedUNet --merge_radius 32 --merge_speed 1 --split_radius 64 --split_speed 2  --use-lbl --size 128 128 --hidden-feat 32  --log-period 10 --features 32 64 128 256 --downsample 2 --data snemi
+# python main.py --env EM_env_DEBUG_1 --gpu-id 0 1 2 3 4 5 6 7 --workers 12 --lbl-agents 2 \--num-steps 5 --max-episode-length 5 --reward normal --model DilatedUNet --merge_radius 16 --merge_speed 2 --split_radius 64 --split_speed 4  --use-lbl --size 128 128 --hidden-feat 2  --log-period 10 --features 32 64 128 256 --downsample 2 --data zebrafish
 debug = True
 
 class General_env (gym.Env):
@@ -38,22 +39,51 @@ class General_env (gym.Env):
         else:
             self.observation_space = Box (-1.0, 1.0, shape=[config["observation_shape"][0]] + self.size, dtype=np.float32)
         self.rng = np.random.RandomState(time_seed ())
-        self.max_lbl = 2 ** self .T - 1
+        self.max_lbl = 2 ** (self .T) - 1
         self.pred_lbl2rgb = color_generator (self.max_lbl + 1)
         self.gt_lbl2rgb = color_generator (111)
 
     def seed (self, seed):
         self.rng = np.random.RandomState(seed)
 
+    def aug (self, image, mask):
+        aug = A.Compose([
+                    A.HorizontalFlip (p=0.5),
+                    A.VerticalFlip(p=0.5),              
+                    A.RandomRotate90(p=0.5),
+                    A.Transpose (p=0.5),
+                    A.OneOf([
+                        A.ElasticTransform(p=0.5, alpha=1, sigma=5, alpha_affine=5, interpolation=cv2.INTER_NEAREST),
+                        A.GridDistortion(p=0.5, interpolation=cv2.INTER_NEAREST),
+                        # A.OpticalDistortion(p=0.5, distort_limit=(0.05, 0.05), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST)                  
+                        ], p=0.5),
+                    A.ShiftScaleRotate (p=0.5, shift_limit=0.05, rotate_limit=20, interpolation=cv2.INTER_NEAREST, scale_limit=(0.05, 0.5), ),
+                    # A.CLAHE(p=0.9),
+                    # A.GaussNoise (p=0.9),
+                    A.Blur (p=0.9)]
+                )
+        ret = aug (image=image, mask=mask)
+        return ret ['image'], ret ['mask']
+
     def step (self, action):
         self.action = action
-        self.new_lbl = self.lbl + action * (2 ** (self.T - self.step_cnt - 1))
+        self.new_lbl = self.lbl + action * (2 ** self.step_cnt)
         done = False
 
         self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - 1) * 255
         if self.T == 1:
             self.mask [self.step_cnt:self.step_cnt+1] += (2 * action - (self.config ["max_lbl"] - 1)) * 255
+        
+        info = {}
 
+        # if (self.step_cnt == 0):
+        #     reward = self.first_step_reward ()
+        #     self.lbl = self.new_lbl
+        #     self.step_cnt += 1
+        #     self.rewards.append (reward)    
+        #     self.sum_reward += reward
+        #     ret = (self.observation (), reward, done, info)
+        #     return ret
         #DEBUG
         # tmp = self.lbl
         # self.lbl = self.new_lbl
@@ -83,12 +113,10 @@ class General_env (gym.Env):
         # self.debug_img = np.concatenate ([self.debug_img, split_reward * 255], 1)
 
         self.lbl = self.new_lbl
-        
         #Reward
         # reward += self.foregr_backgr_reward () / self.T 
 
         self.step_cnt += 1
-        info = {}
 
         merge_reward = np.zeros (self.size, dtype=np.float32)
         for i in range (len (self.merge_radius)):
@@ -99,18 +127,15 @@ class General_env (gym.Env):
 
         # self.debug_img = np.concatenate ([self.debug_img, merge_reward * 255], 1)
         # plt.imshow (self.debug_img)
-        # plt.show ()
-
-        #Reward
-        if self.step_cnt >= self.T:
-            done = True
+        # plt.show ()        
 
         #Reward
         # if self.config ["cell_norm"]:
         #     reward = reward * self.norm_map
         self.rewards.append (reward)    
         self.sum_reward += reward
-
+        if self.step_cnt >= self.T:
+            done = True
         ret = (self.observation (), reward, done, info)
         return ret
 
@@ -263,6 +288,9 @@ class General_env (gym.Env):
             reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
         return reward
 
+    def get_cell_prob_gt (self):
+        return (self.gt_lbl > 0).astype (np.float32)
+
     def observation (self):
         lbl = self.lbl / self.max_lbl * 255.0
         done_mask = np.zeros_like (self.raw)
@@ -376,11 +404,27 @@ class EM_env (General_env):
     def reset (self):
         self.step_cnt = 0
         z0 = self.rng.randint (0, len (self.raw_list))
-        self.raw = copy.deepcopy (self.raw_list [z0])
+        self.raw = np.array (self.raw_list [z0], copy=True)
         if (self.gt_lbl_list is not None):
             self.gt_lbl = copy.deepcopy (self.gt_lbl_list [z0])
         else:
             self.gt_lbl = np.zeros_like (self.raw)
+
+        columns = 2
+        rows = 2
+        print (self.raw.dtype)
+        fig=plt.figure(figsize=(8, 8))
+        fig.add_subplot(rows, columns, 1)
+        plt.title ("raw")
+        plt.imshow (self.raw)
+        fig.add_subplot(rows, columns, 2)
+        plt.imshow (self.gt_lbl, cmap='tab20')
+        self.raw, self.gt_lbl = self.aug (self.raw, self.gt_lbl)
+        fig.add_subplot(rows, columns, 3)
+        plt.imshow (self.raw)
+        fig.add_subplot(rows, columns, 4)
+        plt.imshow (self.gt_lbl, cmap='tab20')
+        plt.show ()
 
         self.raw, self.gt_lbl = self.random_crop (self.size, [self.raw, self.gt_lbl])
         # self.gt_lbl = label (self.gt_lbl > 0, connectivity=1).astype (np.int32)

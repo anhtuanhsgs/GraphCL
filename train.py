@@ -58,6 +58,11 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.model = UNetGRU (env.observation_space.shape, args.features, num_actions, args.hidden_feat)
     elif (args.model == "DilatedUNet"):
         player.model = DilatedUNet (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "UNetEX"):
+        player.model = UNetEX (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "UNetFuse"):
+        player.model = UNetFuse (env.observation_space.shape [0], args.features, num_actions)
+
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -137,6 +142,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                 value, _, _ = player.model((Variable(player.state.unsqueeze(0)), (player.hx, player.cx)))
             elif "GRU" in args.model:
                 value, _, _ = player.model((Variable(player.state.unsqueeze(0)), player.hx))
+            elif "EX" in args.model:
+                value, _, _ = player.model(Variable(player.state.unsqueeze(0)))
             else:
                 value, _ = player.model(Variable(player.state.unsqueeze(0)))
             R = value.data
@@ -148,6 +155,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.values.append(Variable(R))
         policy_loss = 0
         value_loss = 0
+        cell_prob_loss = 0
         gae = torch.zeros(1, 1, env_conf ["size"][0], env_conf ["size"][1])
         if gpu_id >= 0:
             with torch.cuda.device(gpu_id):
@@ -158,22 +166,32 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             if gpu_id >= 0:
                 with torch.cuda.device (gpu_id):
                     reward_i = torch.tensor (player.rewards [i]).cuda ()
+                    if "EX" in args.model:
+                        cell_prob_i = torch.tensor (player.cell_probs [i]).cuda ()
+                        cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None]).cuda ()
             else:
                 reward_i = torch.tensor (player.rewards [i])
+                if "EX" in args.model:
+                    cell_prob_i = torch.tensor (player.cell_probs [i])
+                    cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None])
 
+            if "EX" in args.model:
+                cell_prob_loss = 0.5 * F.binary_cross_entropy (cell_prob_i, cell_prob_loss) + cell_prob_loss
             R = args.gamma * R + reward_i
             advantage = R - player.values[i]
             value_loss = value_loss + (0.5 * advantage * advantage).mean ()
             delta_t = player.values[i + 1].data * args.gamma + reward_i - \
                         player.values[i].data
-
             gae = gae * args.gamma * args.tau + delta_t
             policy_loss = policy_loss - \
                 (player.log_probs[i] * Variable(gae)).mean () - \
                 (0.05 * player.entropies[i]).mean ()
 
+
         player.model.zero_grad ()
         sum_loss = (policy_loss + value_loss)
+        if "EX" in args.model:
+            sum_loss += cell_prob_loss
 
         sum_loss.backward ()
         ensure_shared_grads (player.model, shared_model, gpu=gpu_id >= 0)
@@ -188,6 +206,9 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                     'train: policy_loss': policy_loss, 
                     'train: eps reward': pinned_eps_reward,
                 }
+
+                if "EX" in args.model:
+                    log_info ["cell_prob_loss"] = cell_prob_loss
 
                 for tag, value in log_info.items ():
                     logger.scalar_summary (tag, value, train_step)

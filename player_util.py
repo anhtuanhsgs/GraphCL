@@ -30,6 +30,7 @@ class Agent (object):
         self.entropies = []
         self.actions = []
         self.actions_explained = []
+        self.cell_probs = []
 
     def action_lbl_rand (self, lbl, action, t):
         val_list = np.unique (lbl)
@@ -75,8 +76,12 @@ class Agent (object):
         elif "GRU" in self.args.model:
             value, logit, self.hx = self.model((Variable(
                 self.state.unsqueeze(0)), self.hx))
+        elif "EX" in self.args.model:
+            value, logit, cell_prob = self.model (Variable(self.state.unsqueeze(0)))
+            self.cell_probs.append (cell_prob)
         else:
             value, logit = self.model (Variable(self.state.unsqueeze(0)))
+
         prob = F.softmax(logit, dim=1)
         log_prob = F.log_softmax(logit, dim=1)
         entropy = -(log_prob * prob).sum(1)
@@ -133,6 +138,9 @@ class Agent (object):
                 else:
                     self.hx = Variable (self.hx)
                 value, logit, self.hx = self.model((Variable (self.state.unsqueeze(0)), self.hx))
+            elif "EX" in self.args.model:
+                value, logit, cell_prob = self.model (Variable (self.state.unsqueeze(0)))
+                self.cell_probs.append (cell_prob)
             else:
                 value, logit = self.model(Variable (self.state.unsqueeze(0)))
             
@@ -156,5 +164,6 @@ class Agent (object):
         self.entropies = []
         self.actions = []
         self.actions_explained = []
+        self.cell_probs = []
         return self
 
