@@ -7,13 +7,16 @@ import math as m
 from torch.autograd import Variable
 from scipy import ndimage as ndi
 from natsort import natsorted
-import os, sys, glob, time
+import os, sys, glob, time, warnings
 from Utils.img_aug_func import *
 from skimage.measure import label
 from skimage.filters import sobel
 from malis import rand_index 
 from sklearn.metrics import adjusted_rand_score
 import matplotlib.pyplot as plt
+from skimage.feature import canny
+from skimage import img_as_bool
+
 
 def setup_logger(logger_name, log_file, level=logging.INFO):
     l = logging.getLogger(logger_name)
@@ -147,11 +150,14 @@ def normal(x, mu, sigma, gpu_id, gpu=False):
     return a * b
 
 def get_cell_prob (lbl, dilation, erosion):
-    ESP = 1e-5
+    ESP = 1e-10
     elevation_map = []
     for img in lbl:
         elevation_map += [sobel (img)]
     elevation_map = np.array (elevation_map)
+    # with warnings.catch_warnings():
+    #     warnings.simplefilter("ignore")
+    #     elevation_map = img_as_bool (elevation_map)
     elevation_map = elevation_map > ESP
     cell_prob = ((lbl > 0) ^ elevation_map) & (lbl > 0)
     for i in range (len (cell_prob)):
@@ -161,6 +167,31 @@ def get_cell_prob (lbl, dilation, erosion):
         for j in range (dilation):
             cell_prob [i] = binary_dilation (cell_prob [i])
     return np.array (cell_prob, dtype=np.uint8) * 255
+
+def clean (lbl, minsize=40):
+    sizes = np.bincount (lbl.ravel ())
+    mask_sizes = sizes >= minsize
+    mask_sizes [0] = 0
+    lbl = lbl * mask_sizes [lbl]
+    return lbl
+
+def relabel (lbl):
+    lbl = clean (lbl)
+    ret = np.zeros (lbl.shape, dtype=np.int32)
+    cur_max_val = 0
+    val_list = np.unique (lbl)
+    for val in val_list:
+        if (val == 0):
+            continue
+        mask = (lbl == val)
+        sub_lbl = label (mask, connectivity=1).astype (np.int32)
+        sub_lbl = clean (sub_lbl)
+        sub_lbl = label (sub_lbl, connectivity=1).astype (np.int32)
+
+        sub_lbl += cur_max_val * (sub_lbl > 0)
+        ret += sub_lbl
+        cur_max_val = np.max (ret)
+    return ret
 
 def get_data (path, relabel):
     train_path = natsorted (glob.glob(path + 'A/*.tif'))
@@ -173,7 +204,9 @@ def get_data (path, relabel):
         if (relabel):
             y_train = y_train [0]
 
-            gt_prob = get_cell_prob (y_train, 0, 0)
+            gt_prob = get_cell_prob (y_train, 0, 1)
+            # plt.imshow (gt_prob [0])
+            # plt.show ()
             y_train = []
             for img in gt_prob:
                 if relabel:
@@ -186,6 +219,26 @@ def get_data (path, relabel):
     else:
         y_train = np.zeros_like (X_train)
     return X_train, y_train
+
+class EspTracker ():
+    def __init__ (self, eps, eps_step):
+        self.eps = eps
+        self.eps_step = eps_step
+        self.index = 0
+        self.value = eps [0]
+        self.nstep = 0
+
+    def step (self, n):
+        self.nstep += n
+        if (self.nstep <= self.eps_step [0]):
+            return
+        if self.value <= self.eps[-1] or self.index >= len (self.eps) - 1:
+            return
+        index = self.index
+        self.value -= (self.eps[index-1] - self.eps[index]) / (self.eps_step[index]-self.eps_step[index-1]) * n
+        if index < len (self.eps) and self.value <= self.eps [index]:
+            self.index += 1
+
 
 if __name__ == "__main__":
     r = float (input ())

@@ -23,6 +23,9 @@ class Agent (object):
         self.info = None
         self.reward = 0
 
+        self.t_lbl = None
+        self.t_gt_lbl = None
+
         self.gpu_id = -1
         self.values = []
         self.log_probs = []
@@ -31,13 +34,16 @@ class Agent (object):
         self.actions = []
         self.actions_explained = []
         self.cell_probs = []
+        
 
-    def action_lbl_rand (self, lbl, action, t):
+    def action_lbl_rand (self, lbl, action, eps):
         val_list = np.unique (lbl)
         ret = np.zeros_like (action)
 
         for val in val_list:
-            single_cell_map = lbl == val
+            if (val == 0):
+                continue
+            single_cell_map = (lbl == val)
 
             #DEBUG
             # if val == 0:
@@ -53,14 +59,10 @@ class Agent (object):
             action_tmp = action * single_cell_map
             action_1_count = np.count_nonzero (action_tmp)
             ratio = action_1_count / single_cell_area
-            ratio = np.clip (ratio, 0.05, 0.95)
+            ratio = np.clip (ratio, eps, 1.0-eps)
             sample = self.env.rng.rand ()
             if (sample < ratio):
                 ret += single_cell_map
-
-            #DEBUG
-            # if sample >= ratio:
-            #     ret += single_cell_map
         
         self.action = ret
         ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
@@ -69,7 +71,84 @@ class Agent (object):
                 ret = ret.cuda()
         return ret
 
-    def action_train (self, use_max=False, use_lbl=False):
+    #Operation on GPU
+    def action_lbl_rand_gpu (self, lbl, action):
+        with torch.no_grad ():
+            with torch.cuda.device (self.gpu_id):
+                val_list = self.lbl_list
+                # val_list = torch.unique (lbl)
+                ret = torch.zeros_like (action, requires_grad=False)
+
+                for val in val_list:
+                    if (val == 0):
+                        continue
+                    single_cell_map = (lbl == val).int ()
+                    single_cell_area = single_cell_map.nonzero ().size (0)
+                    action_tmp = action * single_cell_map
+                    action_1_count = action_tmp.nonzero ().size (0)
+                    ratio = action_1_count / single_cell_area
+                    ratio = np.clip (ratio, 0.1, 0.9)
+                    sample = self.env.rng.rand ()
+                    if (sample < ratio):
+                        ret += single_cell_map
+        self.action = ret
+        return ret
+
+    def fetch_lbl_gpu (self):
+        with torch.cuda.device (self.gpu_id):
+            self.lbl_list = np.unique (self.env.gt_lbl).astype (np.int32).tolist ()
+            self.t_lbl = torch.tensor (self.env.lbl, dtype=torch.int32, requires_grad=False).cuda ()
+            self.t_gt_lbl = torch.tensor (self.env.gt_lbl, dtype=torch.int32, requires_grad=False).cuda ()
+
+    def action_train_gpu (self, use_max=False, use_lbl=False):
+        if "Lstm" in self.args.model:
+            value, logit, (self.hx, self.cx) = self.model((Variable(
+                self.state.unsqueeze(0)), (self.hx, self.cx)))
+        elif "GRU" in self.args.model:
+            value, logit, self.hx = self.model((Variable(
+                self.state.unsqueeze(0)), self.hx))
+        elif "EX" in self.args.model:
+            value, logit, cell_prob = self.model (Variable(self.state.unsqueeze(0)))
+            self.cell_probs.append (cell_prob)
+        else:
+            value, logit = self.model (Variable(self.state.unsqueeze(0)))
+
+        prob = F.softmax(logit, dim=1)
+        log_prob = F.log_softmax(logit, dim=1)
+        entropy = -(log_prob * prob).sum(1)
+        self.entropies.append(entropy)
+        
+        prob_tp = prob.permute (0, 2, 3, 1)
+        log_prob_tp = log_prob.permute (0, 2, 3, 1)
+        distribution = torch.distributions.Categorical (prob_tp)
+        shape = prob_tp.shape
+        if not use_max:
+            action_tp = distribution.sample ().reshape (1, shape[1], shape[2], 1).int ()
+            action = action_tp.permute (0, 3, 1, 2)
+            self.t_action = action [0][0]
+
+            if use_lbl:
+                self.t_action = self.action_lbl_rand_gpu (self.t_gt_lbl, self.t_action)
+            self.t_new_lbl = self.t_lbl + self.t_action * (2 ** self.env.step_cnt)    
+
+            log_prob = log_prob.gather(1, Variable(action.long ()))
+            state, self.reward, self.done, self.info = self.env.step_g(
+                self.t_action, self.t_lbl, self.t_new_lbl, self.t_gt_lbl, self.t_density, self.gpu_id)
+
+        if not use_max:
+            self.state = torch.from_numpy(state).float()
+
+        if self.gpu_id >= 0:
+            with torch.cuda.device(self.gpu_id):
+                self.state = self.state.cuda()
+        # self.reward = max(min(self.reward, 1), -1)
+        self.values.append(value)
+        self.log_probs.append(log_prob)
+        self.rewards.append(self.reward [None][None])
+        return self
+
+
+    def action_train (self, use_max=False, use_lbl=False, eps=0.15):
         if "Lstm" in self.args.model:
             value, logit, (self.hx, self.cx) = self.model((Variable(
                 self.state.unsqueeze(0)), (self.hx, self.cx)))
@@ -97,7 +176,7 @@ class Agent (object):
             self.action = action.cpu().numpy() [0][0]
 
             if use_lbl:
-                action = self.action_lbl_rand (self.env.gt_lbl, self.action, self.env.step_cnt)
+                action = self.action_lbl_rand (self.env.gt_lbl, self.action, eps)
 
             log_prob = log_prob.gather(1, Variable(action))
             state, self.reward, self.done, self.info = self.env.step(

@@ -35,7 +35,7 @@ import colorsys
 #     return lbl
 
 def color_generator (N):
-    HSV_tuples = [(x*1.0/N, 0.5, 0.5) for x in range(N)]
+    HSV_tuples = [(x*1.0/N, 0.5, (x%8)*0.07 + 0.5) for x in range(N)]
     RGB_tuples = list (map(lambda x: colorsys.hsv_to_rgb(*x), HSV_tuples))
 
     COLOR_LIST = [(int (rgb[0] * 255), int (rgb[1] * 255), int (rgb[2] * 255)) for rgb in RGB_tuples]

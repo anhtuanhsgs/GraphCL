@@ -3,7 +3,7 @@ from setproctitle import setproctitle as ptitle
 import torch
 import torch.optim as optim
 from environment import *
-from utils import ensure_shared_grads
+from utils import ensure_shared_grads, EspTracker
 from models.models import *
 from player_util import Agent
 from torch.autograd import Variable
@@ -40,6 +40,10 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
     env.seed (args.seed + rank)
     player = Agent (None, env, args, None)
+    if args.reward_gpu:
+        player.gpu_id = gpu_id
+        with torch.cuda.device (gpu_id):
+            player.t_density = torch.ones (player.env.size, dtype=torch.float32, device="cuda", requires_grad=False)
     num_actions = 2
     if args.one_step:
         num_actions = args.one_step
@@ -62,9 +66,15 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         player.model = UNetEX (env.observation_space.shape [0], args.features, num_actions)
     elif (args.model == "UNetFuse"):
         player.model = UNetFuse (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "AttUNet"):
+        player.model = AttU_Net (env.observation_space.shape [0], args.features, num_actions, split=args.data_channel)
+    elif (args.model == "ASPPAttUNet"):
+        player.model = ASPPAttU_Net (env.observation_space.shape [0], args.features, num_actions, split=args.data_channel)
 
 
     player.state = player.env.reset ()
+    if (args.reward_gpu):
+        player.fetch_lbl_gpu ()
     player.state = torch.from_numpy (player.state).float ()
 
     if gpu_id >= 0:
@@ -79,6 +89,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
     # print ("rank: ", rank)
 
+    eps_tracker = EspTracker (args.eps_lbl, args.eps_lbl_step)
+
     while True:
         if gpu_id >= 0:
             with torch.cuda.device (gpu_id):
@@ -90,8 +102,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.eps_len = 0
 
             if rank == 0:
-                if (0 <= (train_step % args.train_log_period) < args.max_episode_length) and train_step > 0:
-                    print ("train: step", train_step, "\teps_reward", eps_reward)
+                if train_step % args.train_log_period == 0 and train_step > 0:
+                    print ("train: step", train_step, "\teps_reward", eps_reward, "\teps_lbl_ratio", str (eps_tracker.value)[:4])
                 if train_step > 0:
                     pinned_eps_reward = player.env.sum_reward.mean ()
                     eps_reward = 0
@@ -116,12 +128,24 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             player.hx = Variable (player.hx.data)
 
         # curtime = time.time ()
+        use_lbl = env.rng.rand () < 0.25
+
         for step in range(args.num_steps):
             # if (env.rng.rand () < 0.25):
-            if rank < args.lbl_agents:
-                player.action_train (use_lbl=True) 
+            if args.reward_gpu:
+                if rank < args.lbl_agents:
+                    player.action_train_gpu (use_lbl=True, eps=eps_tracker.value)
+                    # player.action_train_gpu (use_lbl=use_lbl)
+                else:
+                    player.action_train_gpu ()  
+                    # player.action_train_gpu (use_lbl=use_lbl)
             else:
-                player.action_train () 
+                if rank < args.lbl_agents:
+                    player.action_train (use_lbl=True, eps=eps_tracker.value) 
+                    # player.action_train (use_lbl=use_lbl) 
+                else:
+                    player.action_train () 
+                    # player.action_train (use_lbl=use_lbl) 
 
             if rank == 0:
                 eps_reward = player.env.sum_reward.mean ()
@@ -130,7 +154,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         # print ("timelast: ", time.time () - curtime)
 
         if player.done:
-            state = player.env.reset ()
+            state = player.env.reset (player.model, gpu_id)
             player.state = torch.from_numpy (state).float ()
             if gpu_id >= 0:
                 with torch.cuda.device (gpu_id):
@@ -166,22 +190,21 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
             if gpu_id >= 0:
                 with torch.cuda.device (gpu_id):
                     reward_i = torch.tensor (player.rewards [i]).cuda ()
-                    if "EX" in args.model:
-                        cell_prob_i = torch.tensor (player.cell_probs [i]).cuda ()
-                        cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None]).cuda ()
+                    # if "EX" in args.model:
+                    #     cell_prob_i = torch.tensor (player.cell_probs [i]).cuda ()
+                    #     cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None]).cuda ()
             else:
                 reward_i = torch.tensor (player.rewards [i])
-                if "EX" in args.model:
-                    cell_prob_i = torch.tensor (player.cell_probs [i])
-                    cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None])
+                # if "EX" in args.model:
+                #     cell_prob_i = torch.tensor (player.cell_probs [i])
+                #     cell_prob_gt = torch.tensor (player.env.get_cell_prob_gt ()[None][None])
 
-            if "EX" in args.model:
-                cell_prob_loss = 0.5 * F.binary_cross_entropy (cell_prob_i, cell_prob_loss) + cell_prob_loss
+            # if "EX" in args.model:
+            #     cell_prob_loss = 0.5 * F.binary_cross_entropy (cell_prob_i, cell_prob_loss) + cell_prob_loss
             R = args.gamma * R + reward_i
             advantage = R - player.values[i]
             value_loss = value_loss + (0.5 * advantage * advantage).mean ()
-            delta_t = player.values[i + 1].data * args.gamma + reward_i - \
-                        player.values[i].data
+            delta_t = player.values[i + 1].data * args.gamma + reward_i - player.values[i].data
             gae = gae * args.gamma * args.tau + delta_t
             policy_loss = policy_loss - \
                 (player.log_probs[i] * Variable(gae)).mean () - \
@@ -190,8 +213,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
         player.model.zero_grad ()
         sum_loss = (policy_loss + value_loss)
-        if "EX" in args.model:
-            sum_loss += cell_prob_loss
+        # if "EX" in args.model:
+        #     sum_loss += cell_prob_loss
 
         sum_loss.backward ()
         ensure_shared_grads (player.model, shared_model, gpu=gpu_id >= 0)
@@ -200,6 +223,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
 
         if rank == 0:
             train_step += 1
+            if args.lbl_agents > 0:
+                eps_tracker.step (1)
             if train_step % args.log_period == 0 and train_step > 0:
                 log_info = {
                     'train: value_loss': value_loss, 

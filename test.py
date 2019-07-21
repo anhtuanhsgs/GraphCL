@@ -2,17 +2,73 @@ from __future__ import division
 from setproctitle import setproctitle as ptitle
 import torch
 from environment import *
-from utils import setup_logger
 from models.models import *
 from player_util import Agent
 from torch.autograd import Variable
 import time
 import logging
 from Utils.Logger import Logger
-from Utils.utils import *
+from Utils.utils import create_dir
+from Utils.metrics import GetDices, DiffFGLabels
+from utils import setup_logger, relabel
 import numpy as np
+import cv2
 
-def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
+def inference (args, logger, model, tests, test_env, gpu_id, rng, iter):
+    log_img = []
+    # idxs = rng.choice (len (tests), 10)
+    idxs = []
+    idxs.append (rng.randint (len (tests)))
+    for i in range (min (len (tests), 33)):
+        idxs.append ((idxs [-1] + 1) % len (tests))
+
+    if args.data in ['cvppp']:
+        resize = True
+    else:
+        resize = False
+
+    for i in idxs:
+        obs = test_env.set_sample (i, resize)
+        done = False
+        while (not done):
+            with torch.no_grad ():
+                with torch.cuda.device (gpu_id):
+                    t_obs = torch.tensor (obs[None], dtype=torch.float32, device="cuda")
+                    value, logit = model (t_obs)
+                    prob = F.softmax (logit, dim=1)
+                    action = prob.max (1)[1].data.cpu ().numpy ()
+
+            obs, _, done, _ = test_env.step_inference (action [0])
+        img = test_env.render ()
+        log_img.append (img [:len(img)//2])
+
+    log_img = np.concatenate (log_img, 0)
+    log_info = {"test_samples": log_img}
+    for tag, img in log_info.items ():
+        img = img [None]
+        logger.image_summary (tag, img, iter)
+
+def evaluate (args, logger, env, iter):
+
+    pred_lbl = relabel (env.lbl)
+    gt_lbl = env.gt_lbl
+
+    bestDice, FgBgDice = GetDices (pred_lbl, gt_lbl)
+    diffFG = DiffFGLabels (pred_lbl, gt_lbl)
+
+    log_info = {
+        "bestDice": bestDice,
+        "FgBgDice": FgBgDice,
+        "diffFG": diffFG
+    }
+
+    for tag, value in log_info.items ():
+        logger.scalar_summary (tag, value, iter)
+
+    return bestDice, FgBgDice, diffFG 
+
+
+def test (args, shared_model, env_conf, datasets=None, hasLbl=True, tests=None):
     if hasLbl:
         ptitle ('Valid agent')
     else:
@@ -27,6 +83,9 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
     log['{}_log'.format(args.env)] = logging.getLogger('{}_log'.format(
         args.env))
     d_args = vars (args)
+
+    if tests is not None:
+        test_env = EM_env (tests, env_conf, type="test")
 
     if hasLbl:
         for k in d_args.keys ():
@@ -73,6 +132,10 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
         player.model = UNetEX (env.observation_space.shape [0], args.features, num_actions)
     elif (args.model == "UNetFuse"):
         player.model = UNetFuse (env.observation_space.shape [0], args.features, num_actions)
+    elif (args.model == "AttUNet"):
+        player.model = AttU_Net (env.observation_space.shape [0], args.features, num_actions, split=args.data_channel)
+    elif (args.model == "ASPPAttUNet"):
+        player.model = ASPPAttU_Net (env_conf ["observation_shape"][0], args.features, num_actions, split=args.data_channel)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -106,8 +169,10 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
 
         if player.done:
             flag = True
-
             num_tests += 1
+
+            
+
             reward_total_sum += reward_sum
             reward_mean = reward_total_sum / num_tests
             if hasLbl:
@@ -118,7 +183,7 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
                         reward_sum, player.eps_len, reward_mean, num_tests))
 
             recent_episode_scores += [reward_sum]
-            if len (recent_episode_scores) > 200:
+            if len (recent_episode_scores) > 100:
                 recent_episode_scores.pop (0)
 
             if args.save_max and np.mean (recent_episode_scores) >= max_score:
@@ -136,8 +201,16 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
                         torch.save (state_to_save, '{0}{1}.dat'.format (args.save_model_dir, args.env + '_' + str (num_tests)))
 
             if num_tests % args.log_period == 0:
+                inference (args, logger, player.model, tests, test_env, gpu_id, player.env.rng, num_tests)
+                if (np.max (env.lbl) != 0 and np.max (env.gt_lbl) != 0):
+                    bestDice, FgBgDice, diffFG = evaluate (args, logger, player.env, num_tests)
+                else:
+                    bestDice, FgBgDice, diffFG = 0, 0, 0
+
+                
                 if hasLbl:
                     print ("----------------------VALID SET--------------------------")
+                    print ("bestDice:", bestDice, "FgBgDice:", FgBgDice, "diffFG:", diffFG)
                     print ("Log test #:", num_tests)
                     print ("rewards: ", player.reward.mean ())
                     print ("sum rewards: ", reward_sum)
@@ -169,17 +242,20 @@ def test (args, shared_model, env_conf, datasets=None, hasLbl=True):
                     logger.image_summary (tag, img, num_tests)
 
                 if hasLbl:
-                    log_info = {'mean_valid_reward': reward_mean}
+                    log_info = {'mean_valid_reward': reward_mean,
+                                '100_mean_reward': np.mean (recent_episode_scores)}
                     for tag, value in log_info.items ():
                         logger.scalar_summary (tag, value, num_tests)
+
 
             renderlist = []
             reward_sum = 0
             player.eps_len = 0
             
             player.clear_actions ()
-            state = player.env.reset ()
+            state = player.env.reset (player.model, gpu_id)
             renderlist.append (player.env.render ())
+
             time.sleep (15)
             player.state = torch.from_numpy (state).float ()
             if gpu_id >= 0:
