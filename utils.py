@@ -175,7 +175,7 @@ def clean (lbl, minsize=40):
     lbl = lbl * mask_sizes [lbl]
     return lbl
 
-def relabel (lbl):
+def clean_reindex (lbl):
     lbl = clean (lbl)
     ret = np.zeros (lbl.shape, dtype=np.int32)
     cur_max_val = 0
@@ -196,6 +196,10 @@ def relabel (lbl):
 def get_data (path, relabel):
     train_path = natsorted (glob.glob(path + 'A/*.tif'))
     train_label_path = natsorted (glob.glob(path + 'B/*.tif'))
+    train_path += natsorted (glob.glob (path + "A/*.npy"))
+    train_label_path += natsorted (glob.glob (path + "B/*.npy"))
+
+    
     X_train = read_im (train_path)
     y_train = read_im (train_label_path)
     if (len (X_train) > 0):
@@ -239,6 +243,18 @@ class EspTracker ():
         if index < len (self.eps) and self.value <= self.eps [index]:
             self.index += 1
 
+class ScalaTracker ():
+    def __init__ (self, size):
+        self.arr = []
+        self.size = size
+
+    def push (self, x):
+        self.arr.append (x)
+        if len (self.arr) > self.size:
+            self.arr.pop (0)
+
+    def mean (self):
+        return np.mean (self.arr)
 
 if __name__ == "__main__":
     r = float (input ())

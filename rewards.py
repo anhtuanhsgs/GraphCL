@@ -138,8 +138,53 @@ def bdr_cnt_mask (bdr, seg, bdr_sum, T, debug=False):
 #     plt.imshow (bdr_cnt [seg])
 #     plt.show ()
     return (bdr_cnt [seg].astype (np.int32, copy=False), _bdr_cnt [seg].astype (np.int32, copy=False))
-    
-def split_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T):
+
+def split_reward_s_onlyInr (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+    t_spl_rew = np.zeros (lbl.shape, dtype=np.float32) #True split reward
+    f_mer_pen = np.zeros (lbl.shape, dtype=np.float32) #False merge penalty
+
+    inr_lbl = np.zeros_like (lbl)
+    old_inr_lbl = np.zeros_like (old_lbl)
+
+    for i in np.unique (gt_lbl):
+        if i == 0:
+            continue
+        inr_lbl += lbl * inrs [i]
+        old_inr_lbl += old_lbl * inrs [i] 
+
+    for i in np.unique (gt_lbl):
+        if i == 0:
+            continue
+
+        out1 = (True ^ segs [i])
+        out2 = (True ^ bdrs[i])
+        # print ("split")
+        # fig = plt.figure (figsize=(10,10))
+        # fig.add_subplot (1, 3, 1)
+        # plt.imshow (gt_lbl, cmap="tab20")
+        # fig.add_subplot (1, 3, 2)
+        # plt.imshow (bdrs[i], cmap='gray')
+        # fig.add_subplot (1, 3, 3)
+        # plt.imshow (segs[i], cmap='gray')
+        # plt.show ()
+        bdr = bdrs [i] * inr_lbl; seg = segs [i] * inr_lbl 
+        o_bdr = bdrs[i] * old_inr_lbl; o_seg = segs [i] * old_inr_lbl 
+        bdr [(gt_lbl==0)|out2] = (2 ** T); seg [(gt_lbl==0)|out1] = (2 ** T)
+        o_bdr [(gt_lbl==0)|out2] = (2 ** T); o_seg [(gt_lbl==0)|out1] = (2 ** T)
+        
+        bdr_sum = np.count_nonzero (bdrs[i] * gt_lbl) + 1 #Total non background pixels in bdr 
+        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T, i==3) # #of sames, diffs count in each pixel of inner
+        o_bdr_cnt, _o_bdr_cnt = bdr_cnt_mask (o_bdr, o_seg, bdr_sum, T)
+
+        t_spl_rew += (_bdr_cnt - _o_bdr_cnt) / bdr_sum
+        f_mer_pen += bdr_cnt / (bdr_sum * T)
+        
+    ret = t_spl_rew - f_mer_pen
+    if scaler is not None:
+        ret *= scaler
+    return ret.astype (np.float32, copy=False)
+
+def split_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
     t_spl_rew = np.zeros (lbl.shape, dtype=np.float32) #True split reward
     f_mer_pen = np.zeros (lbl.shape, dtype=np.float32) #False merge penalty
 
@@ -171,6 +216,8 @@ def split_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T):
         f_mer_pen += bdr_cnt / (bdr_sum * T)
         
     ret = t_spl_rew - f_mer_pen
+    if scaler is not None:
+        ret *= scaler
     return ret.astype (np.float32, copy=False)
 
 def inr_cnt_mask (inr, seg, inr_sum, T, debug=False):
@@ -184,7 +231,7 @@ def inr_cnt_mask (inr, seg, inr_sum, T, debug=False):
     
     return (inr_cnt [seg].astype (np.int32, copy=False), _inr_cnt [seg].astype (np.int32, copy=False)) 
 
-def merge_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T):
+def merge_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
     t_mer_rew = np.zeros (lbl.shape, dtype=np.float32)
     f_spl_pen = np.zeros (lbl.shape, dtype=np.float32)
     for i in np.unique (gt_lbl):
@@ -214,6 +261,8 @@ def merge_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T):
         f_spl_pen += (_inr_cnt - _o_inr_cnt) / inr_sum
 
     ret = t_mer_rew - f_spl_pen
+    if scaler is not None:
+        ret *= scaler
     return ret.astype (np.float32, copy=False)
 
 # def inr_cnt_mask (seg, inr_sum, T, debug=False):

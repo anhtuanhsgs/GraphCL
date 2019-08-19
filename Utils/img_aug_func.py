@@ -55,7 +55,12 @@ def color_generator (N):
 def read_im (paths):
     ret = []
     for path in paths:
-        ret.append (io.imread (path))
+        if ".tif" in path:
+            ret.append (io.imread (path))
+        elif ".npy" in path:
+            vol = np.load (path)
+            ret += [vol.tolist ()]
+
     return ret
 
 def random_reverse(image, seed=None):

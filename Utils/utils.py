@@ -71,12 +71,12 @@ def budget_binary_dilation (img, radius, fac=2):
     return img
 
 def budget_binary_erosion (img, fac):
-    sqr_area = m.sqrt (np.count_nonzero (img))
-    if (sqr_area  < 5):
-        return img
+    ori_sqr_area = m.sqrt (np.count_nonzero (img))
+    sqr_area = ori_sqr_area
     cnt = 1
     inr = np.pad (img, 1, mode='constant', constant_values=0)
-    while (m.sqrt (np.count_nonzero (inr)) > fac * sqr_area):
+    while (sqr_area > fac * ori_sqr_area and sqr_area > 10):
         inr = binary_erosion (inr)
+        sqr_area = m.sqrt (np.count_nonzero (inr))
         cnt += 1
     return inr [1:-1,1:-1]

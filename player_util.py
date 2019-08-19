@@ -34,6 +34,7 @@ class Agent (object):
         self.actions = []
         self.actions_explained = []
         self.cell_probs = []
+        self.probs = []
         
 
     def action_lbl_rand (self, lbl, action, eps):
@@ -169,6 +170,7 @@ class Agent (object):
         prob_tp = prob.permute (0, 2, 3, 1)
         log_prob_tp = log_prob.permute (0, 2, 3, 1)
         distribution = torch.distributions.Categorical (prob_tp)
+        # distribution = torch.distributions.Categorical (torch.clamp (prob_tp, 0.05, 0.95))
         shape = prob_tp.shape
         if not use_max:
             action_tp = distribution.sample ().reshape (1, shape[1], shape[2], 1)
@@ -224,6 +226,8 @@ class Agent (object):
                 value, logit = self.model(Variable (self.state.unsqueeze(0)))
             
         prob = F.softmax (logit, dim=1)
+        self.probs.append (prob.data.cpu ().numpy () [0][1])
+
         action = prob.max (1)[1].data.cpu ().numpy ()
         state, self.reward, self.done, self.info = self.env.step (action [0])
         self.state = torch.from_numpy(state).float()
@@ -244,5 +248,6 @@ class Agent (object):
         self.actions = []
         self.actions_explained = []
         self.cell_probs = []
+        self.probs = []
         return self
 

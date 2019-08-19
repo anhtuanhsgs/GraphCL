@@ -10,64 +10,64 @@ from skimage.transform import resize
 import cv2
 import math as m
 
-def reorder_label (lbl):
-    ret = np.zeros_like (lbl)
-    val_list = np.unique (lbl).tolist ()
-    if val_list [0] != 0:
-        for i in range (len (val_list)):
-            if val_list [i] == 0:
-                val_list.pop (i)
-                val_list = [0] + val_list
-                break
-    for i, val in enumerate (val_list):
-        if val == 0:
-            continue
-        ret [lbl == val] = i
-    return ret.astype (np.int32, copy=False)
+# def reorder_label (lbl):
+#     ret = np.zeros_like (lbl)
+#     val_list = np.unique (lbl).tolist ()
+#     if val_list [0] != 0:
+#         for i in range (len (val_list)):
+#             if val_list [i] == 0:
+#                 val_list.pop (i)
+#                 val_list = [0] + val_list
+#                 break
+#     for i, val in enumerate (val_list):
+#         if val == 0:
+#             continue
+#         ret [lbl == val] = i
+#     return ret.astype (np.int32, copy=False)
 
 
-def relabel (lbl):
-    ret = np.zeros (lbl.shape, dtype=np.int32)
-    cur_max_val = 0
-    val_list = np.unique (lbl)
-    for val in val_list:
-        if (val == 0):
-            continue
-        mask = (lbl == val)
-        sub_lbl = label (mask, connectivity=1).astype (np.int32)
+# def relabel (lbl):
+#     ret = np.zeros (lbl.shape, dtype=np.int32)
+#     cur_max_val = 0
+#     val_list = np.unique (lbl)
+#     for val in val_list:
+#         if (val == 0):
+#             continue
+#         mask = (lbl == val)
+#        # sub_lbl = label (mask, connectivity=1).astype (np.int32)
 
-        sub_lbl += cur_max_val * (sub_lbl > 0)
-        ret += sub_lbl
-        cur_max_val = np.max (ret)
-    return ret
+#         sub_lbl += cur_max_val * (sub_lbl > 0)
+#         ret += sub_lbl
+#         cur_max_val = np.max (ret)
+#     return ret
 
 # label = io.imread ("../Data/CVPPP_Challenge/train/B/train_set_B.tif")
-label_ds = io.imread ("../Data/snemi/train/B/train-labels.tif")
+# label_ds = io.imread ("../Data/snemi/train/B/train-labels.tif")
 
-def budget_binary_dilation (img, radius):
-    fac = 2
-    ori_shape = img.shape
-    img = img [::fac,::fac]
-    img = binary_dilation (img, disk (radius // fac))
-    img = img_as_bool (resize (img.astype (np.int8), ori_shape, order=cv2.INTER_NEAREST))
-    return img
+# def budget_binary_dilation (img, radius):
+#     fac = 2
+#     ori_shape = img.shape
+#     img = img [::fac,::fac]
+#     img = binary_dilation (img, disk (radius // fac))
+#     img = img_as_bool (resize (img.astype (np.int8), ori_shape, order=cv2.INTER_NEAREST))
+#     return img
 
-def budget_binary_erosion (img, fac):
-    sqr_area = m.sqrt (np.count_nonzero (img))
-    inr = binary_erosion (img)
-    while (m.sqrt (np.count_nonzero (inr)) > fac * sqr_area):
-        inr = binary_erosion (inr)
-    return inr
+# def budget_binary_erosion (img, fac):
+#     sqr_area = m.sqrt (np.count_nonzero (img))
+#     inr = binary_erosion (img)
+#     while (m.sqrt (np.count_nonzero (inr)) > fac * sqr_area):
+#         inr = binary_erosion (inr)
+#     return inr
 
-img_id = 44
-radius = 36
-img = relabel (reorder_label (label_ds [img_id][::2, ::2][:256,:256]))
-lbl = [img == id for id in np.unique (img)]
-segs = [seg for seg in lbl]
-curtime = time.time ()
-bdrs = [seg ^ budget_binary_dilation (seg, radius) for seg in segs]
-inrs = [budget_binary_erosion (seg, 0.5) for seg in segs]
-print (time.time () - curtime)
+# img_id = 44
+# radius = 36
+# img = relabel (reorder_label (label_ds [img_id][::2, ::2][:256,:256]))
+# lbl = [img == id for id in np.unique (img)]
+# segs = [seg for seg in lbl]
+# curtime = time.time ()
+# bdrs = [seg ^ budget_binary_dilation (seg, radius) for seg in segs]
+# inrs = [budget_binary_erosion (seg, 0.5) for seg in segs]
+# print (time.time () - curtime)
 
 def bdr_cnt_mask (bdr, seg, bdr_sum, T, debug=False):
     bdr_cnt = np.array ([0] * ((2**T) + 1))
@@ -82,7 +82,7 @@ def bdr_cnt_mask (bdr, seg, bdr_sum, T, debug=False):
 #     plt.show ()
     return (bdr_cnt [seg].astype (np.int32, copy=False), _bdr_cnt [seg].astype (np.int32, copy=False))
     
-def split_reward (old_lbl, lbl, gt_lbl, first_step, T):
+def split_reward (old_lbl, lbl, gt_lbl, first_step, T, scaler=None):
     t_spl_rew = np.zeros (lbl.shape, dtype=np.float32) #True split reward
     f_mer_pen = np.zeros (lbl.shape, dtype=np.float32) #False merge penalty
 
@@ -105,6 +105,8 @@ def split_reward (old_lbl, lbl, gt_lbl, first_step, T):
         f_mer_pen += bdr_cnt / (bdr_sum * T)
         
     ret = t_spl_rew - f_mer_pen
+    if scaler is not None:
+        ret *= scaler
     return ret.astype (np.float32, copy=False)
 
 def inr_cnt_mask (inr, seg, inr_sum, T, debug=False):
@@ -118,7 +120,7 @@ def inr_cnt_mask (inr, seg, inr_sum, T, debug=False):
     
     return (inr_cnt [seg].astype (np.int32, copy=False), _inr_cnt [seg].astype (np.int32, copy=False)) 
 
-def merge_reward (old_lbl, lbl, gt_lbl, first_step, T):
+def merge_reward (old_lbl, lbl, gt_lbl, first_step, T, scaler=None):
     t_mer_rew = np.zeros (lbl.shape, dtype=np.float32)
     f_spl_pen = np.zeros (lbl.shape, dtype=np.float32)
     
@@ -140,42 +142,44 @@ def merge_reward (old_lbl, lbl, gt_lbl, first_step, T):
         f_spl_pen += (_inr_cnt - _o_inr_cnt) / inr_sum
 
     ret = t_mer_rew - f_spl_pen
+    if scaler is not None:
+        ret *= scaler
     return ret.astype (np.float32, copy=False)
 
 
-if __name__ == '__main__':
-    state = np.zeros ((256, 256), dtype=np.int32)
-    img = img.astype (np.int32)
-    plt.imshow (img, cmap='tab20c')
-    plt.show ()
-    print ("___________________________________________________")
-    np.random.seed (1)
-    currtime = time.time ()
-    for i in range (4):
-        new_state = np.copy (state)
-        for val in np.unique (img):
+# if __name__ == '__main__':
+#     state = np.zeros ((256, 256), dtype=np.int32)
+#     img = img.astype (np.int32)
+#     plt.imshow (img, cmap='tab20c')
+#     plt.show ()
+#     print ("___________________________________________________")
+#     np.random.seed (1)
+#     currtime = time.time ()
+#     for i in range (4):
+#         new_state = np.copy (state)
+#         for val in np.unique (img):
 
-            if (val == 0):
-                continue
-            # if 0.5 > np.random.rand ():
-            #     new_state += (2**i) * (val == img)
-            if val == 13:
-                plt.imshow (inrs [val])
-                plt.show ()
-                # new_state += ((2**i) * (val == img) and inrs [val]) * (np.random.rand (*state.shape) > 0.5)
-                new_state += ((2**i) * ((val == img) & inrs [val]))
+#             if (val == 0):
+#                 continue
+#             # if 0.5 > np.random.rand ():
+#             #     new_state += (2**i) * (val == img)
+#             if val == 13:
+#                 plt.imshow (inrs [val])
+#                 plt.show ()
+#                 # new_state += ((2**i) * (val == img) and inrs [val]) * (np.random.rand (*state.shape) > 0.5)
+#                 new_state += ((2**i) * ((val == img) & inrs [val]))
 
-        split_rew = split_reward (state, new_state, img, (i==0), 4)
-        merge_rew = merge_reward (state, new_state, img, (i==0), 4)
-        fig=plt.figure(figsize=(8, 8))
-        split_rew [0,0] = 1.0
-        split_rew [0,1] = 0.0
-        fig.add_subplot(1, 3, 1);    plt.imshow (new_state, cmap='tab20');
-        fig.add_subplot(1, 3, 2);    plt.imshow (split_rew, cmap='gray')
-        fig.add_subplot(1, 3, 3);    plt.imshow (merge_rew, cmap='gray')
+#         split_rew = split_reward (state, new_state, img, (i==0), 4)
+#         merge_rew = merge_reward (state, new_state, img, (i==0), 4)
+#         fig=plt.figure(figsize=(8, 8))
+#         split_rew [0,0] = 1.0
+#         split_rew [0,1] = 0.0
+#         fig.add_subplot(1, 3, 1);    plt.imshow (new_state, cmap='tab20');
+#         fig.add_subplot(1, 3, 2);    plt.imshow (split_rew, cmap='gray')
+#         fig.add_subplot(1, 3, 3);    plt.imshow (merge_rew, cmap='gray')
         
-        print (np.max (split_rew), np.min (split_rew))
-        plt.show ()
-        print ("___________________________________________________")
-        state = new_state
-    print (time.time () - currtime)
+#         print (np.max (split_rew), np.min (split_rew))
+#         plt.show ()
+#         print ("___________________________________________________")
+#         state = new_state
+#     print (time.time () - currtime)
