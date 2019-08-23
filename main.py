@@ -92,7 +92,7 @@ parser.add_argument(
 
 parser.add_argument(
     '--load-model-dir',
-    default='trained_models/',
+    default='../trained_models/',
     metavar='LMD',
     help='folder to load trained models from')
 
@@ -248,7 +248,7 @@ parser.add_argument (
 parser.add_argument (
     '--data',
     default='snemi',
-    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018']
+    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape"]
 )
 
 parser.add_argument (
@@ -264,6 +264,12 @@ parser.add_argument (
 parser.add_argument (
     '--fgbg-ratio',
     default=0.2,
+    type=float,
+)
+
+parser.add_argument (
+    '--st-fgbg-ratio',
+    default=0.5,
     type=float,
 )
 
@@ -284,12 +290,22 @@ parser.add_argument (
     default=0
 )
 
+parser.add_argument (
+    '--minsize',
+    type=int,
+    default=20,
+)   
+
+
 def setup_env_conf (args):
 
     env_conf = {
+        "data": args.data,
         "T": args.max_episode_length,
         "size": args.size,
         "fgbg_ratio": args.fgbg_ratio,
+        "st_fgbg_ratio": args.st_fgbg_ratio,
+        "minsize": args.minsize,
         
         "in_radius": args.in_radius,
         "out_radius": args.out_radius,
@@ -368,8 +384,14 @@ def setup_data (args):
         path_test = "Data/MoNuSeg2018/train/"
         args.data_channel = 3
         args.testlbl = True
+    if args.data == "Cityscape":
+        path_train = "../Data/cityscape/train/"
+        path_test = "../Data/cityscape/valid/"
+        path_valid = "../Data/cityscape/valid/"
+        args.testlbl = True
+        args.data_channel = 3
 
-    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018']
+    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape']
     
     raw, gt_lbl = get_data (path=path_train, relabel=relabel)
     raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)
@@ -387,9 +409,8 @@ def setup_data (args):
         gt_lbl_valid = np.copy (gt_lbl)
 
     if (args.SEMI_DEBUG):
-        size = args.size [0] * args.downsample
-        raw = raw[:3]
-        gt_lbl = gt_lbl [:3]
+        raw = raw [:1000]
+        gt_lbl = gt_lbl [:1000]
 
     ds = args.downsample
     if args.downsample:
@@ -399,7 +420,8 @@ def setup_data (args):
         gt_lbl_valid = [gt_lbl_valid [i][::ds, ::ds] for i in range (len (gt_lbl_valid))]
         if raw_test is not None:
             raw_test = [raw_test [i][::ds, ::ds] for i in range (len (raw_test))]
-
+        if args.testlbl:
+            gt_lbl_test = [gt_lbl_test [i][::ds, ::ds] for i in range (len (gt_lbl_test))]
     return raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test
 
 if __name__ == '__main__':

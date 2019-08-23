@@ -51,26 +51,44 @@ class General_env (gym.Env):
         self.rng = np.random.RandomState(seed)
 
     def aug (self, image, mask):
-            
+        
+
+
         if image.shape [-1] == 3:
-            aug = A.Compose([
+            if self.config ["data"] in ["Cityscape", "kitti"]:
+                aug = A.Compose([
                         A.HorizontalFlip (p=0.5),
-                        A.VerticalFlip(p=0.5),              
-                        A.RandomRotate90(p=0.5),
-                        A.Transpose (p=0.5),
                         A.OneOf([
                             A.ElasticTransform(p=0.9, alpha=1, sigma=5, alpha_affine=5, interpolation=cv2.INTER_NEAREST),
                             A.GridDistortion(p=0.9, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
                             A.OpticalDistortion(p=0.9, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
                             ], p=0.7),
-                        A.ShiftScaleRotate (p=0.7, shift_limit=0.3, rotate_limit=90, interpolation=cv2.INTER_NEAREST, scale_limit=(0.3, 0.3), border_mode=cv2.BORDER_CONSTANT),
-                        A.CLAHE(p=0.3),
+                        A.ShiftScaleRotate (p=0.7, shift_limit=0.2, rotate_limit=0, interpolation=cv2.INTER_NEAREST, scale_limit=(0.7, 0.7), border_mode=cv2.BORDER_CONSTANT),
                         A.RandomBrightness (p=0.7, limit=0.5),
                         A.RandomContrast (p=0.5),
                         A.GaussNoise (p=0.5),
                         A.Blur (p=0.5, blur_limit=4),
                         ]
                     )
+            else:
+                aug = A.Compose([
+                            A.HorizontalFlip (p=0.5),
+                            A.VerticalFlip(p=0.5),              
+                            A.RandomRotate90(p=0.5),
+                            A.Transpose (p=0.5),
+                            A.OneOf([
+                                A.ElasticTransform(p=0.9, alpha=1, sigma=5, alpha_affine=5, interpolation=cv2.INTER_NEAREST),
+                                A.GridDistortion(p=0.9, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
+                                A.OpticalDistortion(p=0.9, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
+                                ], p=0.7),
+                            A.ShiftScaleRotate (p=0.7, shift_limit=0.3, rotate_limit=90, interpolation=cv2.INTER_NEAREST, scale_limit=(0.3, 0.5), border_mode=cv2.BORDER_CONSTANT),
+                            A.CLAHE(p=0.3),
+                            A.RandomBrightness (p=0.7, limit=0.5),
+                            A.RandomContrast (p=0.5),
+                            A.GaussNoise (p=0.5),
+                            A.Blur (p=0.5, blur_limit=4),
+                            ]
+                        )
         else:
             aug = A.Compose([
                         A.HorizontalFlip (p=0.5),
@@ -128,8 +146,8 @@ class General_env (gym.Env):
 
         reward = np.zeros (self.size, dtype=np.float32)
 
-        reward += self.foreground_reward (self.step_cnt>=self.T)
-        reward += self.background_reward (self.step_cnt>=self.T)
+        # reward += self.foreground_reward (self.step_cnt>=self.T)
+        reward += self.background_reward (False)
         
         split_reward = np.zeros (self.size, dtype=np.float32)
         merge_reward = np.zeros (self.size, dtype=np.float32)
@@ -181,7 +199,7 @@ class General_env (gym.Env):
             for radius in self.config ["out_radius"]:
                 self.bdrs += [[seg ^ budget_binary_dilation (seg, radius) for seg in self.segs]]
             for seg in self.segs:
-                self.inrs += [budget_binary_erosion (seg, self.config["in_radius"])]
+                self.inrs += [budget_binary_erosion (seg, self.config["in_radius"], minsize=self.config["minsize"])]
             # self.inrs = [seg for seg in self.segs]
 
             if self.config ["seg_scale"]:
@@ -201,11 +219,11 @@ class General_env (gym.Env):
 
     def first_step_reward (self, density=None):
         reward = np.zeros (self.size, dtype=np.float32)
-        foregr_ratio = self.config ["fgbg_ratio"]
-        reward += ((self.new_lbl != 0) & (self.gt_lbl != 0)) * (1.0 - foregr_ratio)
-        reward += ((self.new_lbl == 0) & (self.gt_lbl == 0)) * (foregr_ratio)
-        reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1.0 - foregr_ratio)
-        reward -= ((self.new_lbl != 0) & (self.gt_lbl == 0)) * (foregr_ratio)
+        st_foregr_ratio = self.config ["st_fgbg_ratio"]
+        reward += ((self.new_lbl != 0) & (self.gt_lbl != 0)) * (1.0 - st_foregr_ratio)
+        reward += ((self.new_lbl == 0) & (self.gt_lbl == 0)) * (st_foregr_ratio)
+        reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1.0 - st_foregr_ratio)
+        reward -= ((self.new_lbl != 0) & (self.gt_lbl == 0)) * (st_foregr_ratio)
         if self.config ["seg_scale"]:
             reward *= self.scaler
         return reward
@@ -376,15 +394,28 @@ class EM_env (General_env):
         else:
             self.gt_lbl = np.zeros (self.size, dtype=np.int32)
 
-        # plt.imshow (self.gt_lbl)
-        # plt.show ()
-        if (not resize):
-            self.raw = self.random_crop (self.size, [self.raw]) [0]
-        else:
-            self.raw =  cv2.resize (self.raw, tuple (self.size), interpolation=cv2.INTER_NEAREST)
 
         # print (self.raw.shape, self.gt_lbl.shape)
 
+        # plt.imshow (self.gt_lbl)
+        # plt.show ()
+        if (not resize):
+            if self.gt_lbl_list is not None:
+                self.raw, self.gt_lbl = self.random_crop (self.size, [self.raw, self.gt_lbl])
+            else:
+                self.raw = self.random_crop (self.size, [self.raw]) [0]
+        else:
+            self.raw = cv2.resize (self.raw, tuple (self.size), interpolation=cv2.INTER_NEAREST)
+            self.gt_lbl = cv2.resize (self.gt_lbl, tuple (self.size), interpolation=cv2.INTER_NEAREST)
+
+        # print (self.raw.shape, self.gt_lbl.shape)
+
+        # fig=plt.figure(figsize=(8, 8))
+        # fig.add_subplot (1, 2, 1)
+        # plt.imshow (self.raw)
+        # fig.add_subplot (1, 2, 2)
+        # plt.imshow (self.gt_lbl)
+        # plt.show ()
 
         # plt.imshow (self.gt_lbl)
         # plt.show ()
