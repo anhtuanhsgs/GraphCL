@@ -37,11 +37,17 @@ def inference (args, logger, model, tests, test_env, gpu_id, rng, iter):
     for i in idxs:
         obs = test_env.set_sample (i, resize)
         done = False
+        if args.lstm_feats:
+            with torch.cuda.device (gpu_id):
+                cx, hx = model.lstm.init_hidden (batch_size=1, use_cuda=True)
         while (not done):
             with torch.no_grad ():
                 with torch.cuda.device (gpu_id):
                     t_obs = torch.tensor (obs[None], dtype=torch.float32, device="cuda")
-                    value, logit = model (t_obs)
+                    if args.lstm_feats:
+                        value, logit, (hx, cx) = model ((t_obs, (hx, cx)))
+                    else:
+                        value, logit = model (t_obs)
                     prob = F.softmax (logit, dim=1)
                     action = prob.max (1)[1].data.cpu ().numpy ()
 
@@ -75,10 +81,13 @@ def evaluate (args, env):
 
 
 def test (args, shared_model, env_conf, datasets=None, tests=None):
-
     ptitle ('Valid agent')
 
-    gpu_id = args.gpu_ids [-1]
+    if args.valid_gpu < 0:
+        gpu_id = args.gpu_ids [-1]
+    else:
+        gpu_id = args.valid_gpu
+        
     env_conf ["env_gpu"] = gpu_id
 
     if not args.deploy:
@@ -123,10 +132,9 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
     reward_total_sum = 0
 
     player = Agent (None, env, args, None)
-
     player.gpu_id = gpu_id
-    
-    player.model = get_model (args.model, env_conf ["observation_shape"], args.features, num_actions=2, split=args.data_channel)
+    player.model = get_model (args, args.model, env_conf ["observation_shape"], args.features, 
+                            atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, gpu_id=gpu_id)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -218,6 +226,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                     bestDice, FgBgDice, diffFG = 0, 0, 0
 
                 print ("----------------------VALID SET--------------------------")
+                print (args.env)
                 print ("bestDice:", bestDice, "FgBgDice:", FgBgDice, "diffFG:", diffFG)
                 print ("mean bestDice")
                 print ("Log test #:", num_tests)

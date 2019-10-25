@@ -265,6 +265,68 @@ def merge_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scale
         ret *= scaler
     return ret.astype (np.float32, copy=False)
 
+def merge_pen_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+    t_mer_rew = np.zeros (gt_lbl.shape, dtype=np.float32)
+    f_spl_pen = np.zeros (gt_lbl.shape, dtype=np.float32)
+
+    for i in np.unique (gt_lbl):
+        if i == 0:
+            continue
+        out1 = (True ^ segs [i])
+        seg = (segs [i] * action).astype (np.int64, copy=False)
+        seg [out1] = (2 ** T)
+
+        seg_sum = np.count_nonzero (segs [i] * gt_lbl) + 1 #Total non background pixels in seg 
+        seg_cnt, _seg_cnt = inr_cnt_mask (seg, seg, seg_sum, T)
+
+        # t_mer_rew += seg_cnt / (seg_sum * T)
+        f_spl_pen += _seg_cnt / (seg_sum * T)
+
+    ret = t_mer_rew - f_spl_pen
+    if scaler is not None:
+        ret *= scaler
+    return ret.astype (np.float32, copy=False)
+
+def split_rew_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+    t_spl_rew = np.zeros (lbl.shape, dtype=np.float32) #True split reward
+    f_mer_pen = np.zeros (lbl.shape, dtype=np.float32) #False merge penalty
+
+    for i in np.unique (gt_lbl):
+        if i == 0:
+            continue
+
+        out1 = (True ^ segs [i])
+        out2 = (True ^ bdrs[i])
+        # print ("split")
+        # fig = plt.figure (figsize=(10,10))
+        # fig.add_subplot (1, 3, 1)
+        # plt.imshow (gt_lbl, cmap="tab20")
+        # fig.add_subplot (1, 3, 2)
+        # plt.imshow (bdrs[i], cmap='gray')
+        # fig.add_subplot (1, 3, 3)
+        # plt.imshow (segs[i], cmap='gray')
+        # plt.show ()
+        bdr = bdrs [i] * action; seg = segs [i] * action 
+        bdr [(gt_lbl==0)|out2] = (2 ** T); seg [(gt_lbl==0)|out1] = (2 ** T)
+        
+        bdr_sum = np.count_nonzero (bdrs[i] * gt_lbl) + 1 #Total non background pixels in bdr 
+        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T, i==3) # #of sames, diffs count in each pixel of inner
+
+        t_spl_rew += _bdr_cnt / (bdr_sum * T)
+        # f_mer_pen += bdr_cnt / (bdr_sum * T)
+        
+    ret = t_spl_rew - f_mer_pen
+    if scaler is not None:
+        ret *= scaler
+    return ret.astype (np.float32, copy=False)
+
+
+# def split_reward_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+#     t_mer_rew = np.zeros (gt_lbl.shape, dtype=np.float32)
+#     f_spl_pen = np.zeros (gt_lbl.shape, dtype=np.float32)
+
+
+
 # def inr_cnt_mask (seg, inr_sum, T, debug=False):
 #     inr_cnt = np.array ([0] * ((2**T) + 1))
 #     inr_uni = np.unique (seg, return_counts=True)

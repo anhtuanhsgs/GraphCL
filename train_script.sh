@@ -12,3 +12,4 @@ python main.py --env EM_env_attempt8 --gpu-id 0 1 2 3 4 5 6 7 --workers 16 \
 	--num-steps 4 --max-episode-length 4 --reward density --model UNetGRU \
 	--radius 48 --use-lbl --size 128 128 --hidden-feat 48 \
 	--log-period 10 --features 16 32 64 128 --speed 1 --downsample
+

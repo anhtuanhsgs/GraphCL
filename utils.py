@@ -152,6 +152,7 @@ def normal(x, mu, sigma, gpu_id, gpu=False):
 def get_cell_prob (lbl, dilation, erosion):
     ESP = 1e-10
     elevation_map = []
+    # print (len (lbl), lbl [0].shape)
     for img in lbl:
         elevation_map += [sobel (img)]
     elevation_map = np.array (elevation_map)
@@ -159,7 +160,7 @@ def get_cell_prob (lbl, dilation, erosion):
     #     warnings.simplefilter("ignore")
     #     elevation_map = img_as_bool (elevation_map)
     elevation_map = elevation_map > ESP
-    cell_prob = ((lbl > 0) ^ elevation_map) & (lbl > 0)
+    cell_prob = [((lbl [i] > 0) ^ elevation_map [i]) & (lbl [i] > 0) for i in range (len (lbl))]
     for i in range (len (cell_prob)):
         for j in range (erosion):
             cell_prob [i] = binary_erosion (cell_prob [i])
@@ -193,6 +194,13 @@ def clean_reindex (lbl):
         cur_max_val = np.max (ret)
     return ret
 
+def vols2list (vols):
+    ret = []
+    for vol in vols:
+        for img in vol:
+            ret += [img]
+    return ret
+
 def get_data (path, relabel):
     train_path = natsorted (glob.glob(path + 'A/*.tif'))
     train_label_path = natsorted (glob.glob(path + 'B/*.tif'))
@@ -203,10 +211,17 @@ def get_data (path, relabel):
     X_train = read_im (train_path)
     y_train = read_im (train_label_path)
     if (len (X_train) > 0):
-        X_train = X_train [0]
+        if len (X_train) == 1:
+            X_train = X_train [0]
+        else:
+            X_train =  vols2list (X_train)
     if (len (y_train) > 0):
+        if len (y_train) == 1:
+                y_train = y_train [0]
+        else:
+            y_train = vols2list (y_train)
         if (relabel):
-            y_train = y_train [0]
+            
 
             gt_prob = get_cell_prob (y_train, 0, 1)
             # plt.imshow (gt_prob [0])
@@ -217,9 +232,6 @@ def get_data (path, relabel):
                     y_train += [label (img).astype (np.int32)]
                 else:
                     y_train += [img]
-            y_train = np.array (y_train)
-        else:
-            y_train = y_train [0]
     else:
         y_train = np.zeros_like (X_train)
     return X_train, y_train

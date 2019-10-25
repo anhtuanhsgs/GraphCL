@@ -52,7 +52,12 @@ class General_env (gym.Env):
 
     def aug (self, image, mask):
         
-
+        if self.config ["data"] == "zebrafish":
+            randomBrightness =  A.RandomBrightness (p=0.3, limit=0.1)
+            RandomContrast = A.RandomContrast (p=0.1)
+        else:
+            randomBrightness = A.RandomBrightness (p=0.7, limit=0.5)
+            RandomContrast = A.RandomContrast (p=0.5)
 
         if image.shape [-1] == 3:
             if self.config ["data"] in ["Cityscape", "kitti"]:
@@ -102,8 +107,8 @@ class General_env (gym.Env):
                             ], p=0.6),
                         A.ShiftScaleRotate (p=0.5, shift_limit=0.3, rotate_limit=90, interpolation=cv2.INTER_NEAREST, scale_limit=(0.1, 0.2), border_mode=cv2.BORDER_CONSTANT),
                         # A.CLAHE(p=0.3),
-                        A.RandomBrightness (p=0.5, limit=0.5),
-                        A.RandomContrast (p=0.5),
+                        randomBrightness,
+                        RandomContrast,
                         A.GaussNoise (p=0.5),
                         A.Blur (p=0.3, blur_limit=4),
                         ]
@@ -162,14 +167,18 @@ class General_env (gym.Env):
             # while (True):
             #     pass
             for i in range (len (self.bdrs)):
-                split_reward += split_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs, self.inrs, self.bdrs [i], self.T, scaler)
-            merge_reward += merge_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs, self.bdrs [0], self.T, scaler)
+                split_reward += split_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs [0], self.inrs [0], self.bdrs [i], self.T, scaler)
+            for i in range (len (self.inrs)):
+                merge_reward += merge_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [i], self.bdrs [0], self.T, scaler)
+            # merge_reward += merge_pen_action (action, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [0], self.bdrs [0], self.T, scaler)
+            # split_reward += split_rew_action (action, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [0], self.bdrs [0], self.T, scaler)
+            
             # split_reward_inr += split_reward_s_onlyInr (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs, self.inrs, self.bdrs, self.T, scaler)
-            reward += 2 * split_reward + merge_reward #+ split_reward * merge_reward
+            reward += self.config ["spl_w"] * split_reward + self.config ["mer_w"] * merge_reward #+ split_reward * merge_reward`
 
         self.lbl = self.new_lbl
         self.step_cnt += 1
-       
+        
         #Reward
         self.rewards.append (reward)    
         self.sum_reward += reward
@@ -198,8 +207,8 @@ class General_env (gym.Env):
 
             for radius in self.config ["out_radius"]:
                 self.bdrs += [[seg ^ budget_binary_dilation (seg, radius) for seg in self.segs]]
-            for seg in self.segs:
-                self.inrs += [budget_binary_erosion (seg, self.config["in_radius"], minsize=self.config["minsize"])]
+            for radius in self.config ["in_radius"]:
+                self.inrs += [[budget_binary_erosion (seg, radius, minsize=self.config["minsize"]) for seg in self.segs]]
             # self.inrs = [seg for seg in self.segs]
 
             if self.config ["seg_scale"]:
@@ -405,8 +414,10 @@ class EM_env (General_env):
             else:
                 self.raw = self.random_crop (self.size, [self.raw]) [0]
         else:
-            self.raw = cv2.resize (self.raw, tuple (self.size), interpolation=cv2.INTER_NEAREST)
-            self.gt_lbl = cv2.resize (self.gt_lbl, tuple (self.size), interpolation=cv2.INTER_NEAREST)
+            self.raw = cv2.resize (self.raw, (self.size [1], self.size[0]), interpolation=cv2.INTER_NEAREST)
+            self.gt_lbl = cv2.resize (self.gt_lbl, (self.size [1], self.size [0]), interpolation=cv2.INTER_NEAREST)
+
+        # print (self.raw.shape)
 
         # print (self.raw.shape, self.gt_lbl.shape)
 

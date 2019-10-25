@@ -154,7 +154,8 @@ parser.add_argument (
 parser.add_argument (
     '--in-radius',
     type=float,
-    default=1.1
+    default=[1.1],
+    nargs='+'
 )
 
 parser.add_argument (
@@ -215,7 +216,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=["AttUNet", "ASPPAttUNet", "DeepLab"]
+    choices=["AttUNet", "ASPPAttUNet", "DeepLab", "ASPPAttUNet2", "AttUNet2"]
 )
 
 parser.add_argument (
@@ -294,8 +295,44 @@ parser.add_argument (
     '--minsize',
     type=int,
     default=20,
-)   
+)
 
+
+parser.add_argument (
+    '--spl_w',
+    type=float,
+    default=2,
+)
+
+parser.add_argument (
+    '--mer_w',
+    type=float,
+    default=1,
+)
+
+parser.add_argument (
+    '--noisy',
+    action='store_true',
+)
+
+parser.add_argument (
+    '--lstm-feats',
+    type=int,
+    default=0,
+)
+
+parser.add_argument (
+    '--valid-gpu',
+    type=int,
+    default=-1,
+)
+
+parser.add_argument (
+    '--atr-rate',
+    type=int,
+    default= [6, 12, 18],
+    nargs='+'
+)
 
 def setup_env_conf (args):
 
@@ -311,6 +348,8 @@ def setup_env_conf (args):
         "out_radius": args.out_radius,
         "split_radius": args.split_radius,
         "merge_radius": args.merge_radius,
+        "spl_w": args.spl_w,
+        "mer_w": args.mer_w,
 
         "merge_speed": args.merge_speed,
         "split_speed": args.split_speed,
@@ -319,6 +358,7 @@ def setup_env_conf (args):
         "use_masks": args.use_masks,
         "seg_scale": args.seg_scale,
         "DEBUG": args.DEBUG,
+
     }
 
     env_conf ["observation_shape"] = [args.data_channel + 1] + env_conf ["size"]
@@ -337,9 +377,10 @@ def setup_env_conf (args):
     args.env += "_" + args.reward
     args.env += "_" + args.data
 
-    args.log_dir += args.env + "/"
-    args.save_model_dir += args.env + "/"
+    args.log_dir += args.data + "/" + args.env + "/"
+    args.save_model_dir += args.data + "/" + args.env + "/"
     create_dir (args.save_model_dir)
+    create_dir (args.log_dir)
     return env_conf
  
 def setup_data (args):
@@ -358,6 +399,7 @@ def setup_data (args):
     if args.data == "zebrafish":
         path_train = "Data/Zebrafish/train/"
         path_valid = "Data/Zebrafish/valid/"
+        path_test = "Data/Zebrafish/valid/"
         args.data_channel = 1
         args.testlbl = True
     if args.data == "cvppp":
@@ -373,11 +415,11 @@ def setup_data (args):
         args.data_channel = 3
         args.testlbl = False
     if args.data == 'kitti':
-        path_train = "Data/kitti/train/"
+        path_train = "Data/kitti/train2/"
         path_valid = "Data/kitti/train/"
-        path_test = "Data/kitti/test/"
+        path_test = "Data/kitti/train/"
         args.data_channel = 3
-        args.testlbl = False
+        args.testlbl = True
     if args.data == 'mnseg2018':
         path_train = "Data/MoNuSeg2018/train/"
         path_valid = "Data/MoNuSeg2018/train/"
@@ -391,7 +433,7 @@ def setup_data (args):
         args.testlbl = True
         args.data_channel = 3
 
-    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape']
+    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish']
     
     raw, gt_lbl = get_data (path=path_train, relabel=relabel)
     raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)
@@ -414,14 +456,16 @@ def setup_data (args):
 
     ds = args.downsample
     if args.downsample:
-        raw = [raw [i][::ds, ::ds] for i in range (len (raw))]
-        gt_lbl = [gt_lbl [i][::ds, ::ds] for i in range (len (gt_lbl))]
-        raw_valid = [raw_valid [i][::ds, ::ds] for i in range (len (raw_valid))]
-        gt_lbl_valid = [gt_lbl_valid [i][::ds, ::ds] for i in range (len (gt_lbl_valid))]
+        size = args.size
+        raw = resize_volume (raw, size, ds)
+        gt_lbl = resize_volume (gt_lbl, size, ds)
+        raw_valid = resize_volume (raw_valid, size, ds)
+        gt_lbl_valid = resize_volume (gt_lbl_valid, size, ds)
         if raw_test is not None:
-            raw_test = [raw_test [i][::ds, ::ds] for i in range (len (raw_test))]
+            raw_test = resize_volume (raw_test, size, ds)
         if args.testlbl:
-            gt_lbl_test = [gt_lbl_test [i][::ds, ::ds] for i in range (len (gt_lbl_test))]
+            gt_lbl_test = resize_volume (gt_lbl_test, size, ds)
+            
     return raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test
 
 if __name__ == '__main__':
@@ -440,7 +484,8 @@ if __name__ == '__main__':
 
     env_conf = setup_env_conf (args)
 
-    shared_model = get_model (args.model, env_conf ["observation_shape"], args.features, num_actions=2, split=args.data_channel)
+    shared_model = get_model (args, args.model, env_conf ["observation_shape"], args.features, 
+                        atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel)
 
     if args.load:
         saved_state = torch.load(

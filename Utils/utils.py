@@ -17,8 +17,13 @@ def time_seed ():
     return seed
 
 def create_dir (directory):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+    folders = directory.split ("/")
+    path = ""
+
+    for folder in folders:
+        path += folder + "/"
+        if not os.path.exists(path):
+            os.makedirs(path)
 
 def reorder_label (lbl):
     ret = np.zeros_like (lbl)
@@ -80,3 +85,10 @@ def budget_binary_erosion (img, fac, minsize=20):
         sqr_area = m.sqrt (np.count_nonzero (inr))
         cnt += 1
     return inr [1:-1,1:-1]
+
+def resize_volume (vol, size, ds):
+    if ds <= 0: 
+        ret = [cv2.resize (vol[i], (size[1], size[0]), interpolation=cv2.INTER_NEAREST) for i in range (len (vol))]
+    else:
+        ret = [vol [i][::ds, ::ds] for i in range (len (vol))]
+    return ret

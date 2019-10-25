@@ -8,6 +8,8 @@ import numpy as np
 import time
 from .basic_modules import *
 from .modeling.deeplab import DeepLab
+from .att_unet import AttU_Net2, AttU_Net
+from .aspp_att_unet import ASPPAttU_Net2, ASPPAttU_Net
 
 class outconv(nn.Module):
     def __init__(self, in_ch, out_ch, kernel_size=3, bias=True):
@@ -18,180 +20,41 @@ class outconv(nn.Module):
         x = self.conv(x)
         return x
 
-class FuseIn (nn.Module):
-    def __init__ (self, in_ch, out_ch, split=1):
-        super (FuseIn, self).__init__ ()
-        self.split = split
-        self.local0 = ConvInELU (split, out_ch, kernel_size=3)
-        self.local1 = ConvInELU (out_ch, out_ch, kernel_size=3)
-        self.global0 = ConvELU (in_ch-split, out_ch, kernel_size=7)
-        self.global1 = ConvELU (out_ch, out_ch, kernel_size=1)
-        self.global2 = ConvInELU (out_ch, out_ch, kernel_size=3)
+class ActorCritic (nn.Module):
+    def __init__(self, args, last_feat_ch, backbone, out_ch, gpu_id=0):
+        super(ActorCritic,self).__init__()
+        self.name = backbone.name
+        self.backbone=backbone
+        if args.lstm_feats:
+            self.lstm = ConvLSTMCell (args.size, last_feat_ch, args.lstm_feats, kernel_size=(3, 3), bias=True)
+            last_feat_ch = args.lstm_feats
+            self.use_lstm = True
+        else:
+            self.use_lstm = False
+        if args.noisy:
+            self.actor = nn.Sequential (
+                NoisyConv2d (last_feat_ch, out_ch, kernel_size=(3,3), factorised=False, gpu_id=gpu_id),
+                # NoisyConv2d (16, out_ch, kernel_size=(1,1), padding=(0,0),factorised=False, gpu_id=gpu_id),
+            )
+        else:
+            self.actor = outconv(last_feat_ch, out_ch, kernel_size=1)
+
+        self.critic = outconv (last_feat_ch, 1, kernel_size=1)
 
     def forward (self, x):
-        x_raw = x [:, :self.split, :, :]
-        x_lbl = x [:, self.split:, :, :]
-        
-        x_raw = self.local0 (x_raw)
-        x_raw = self.local1 (x_raw)
-        
-        x_lbl = self.global0 (x_lbl)
-        x_lbl = self.global1 (x_lbl)
-        x_lbl = self.global2 (x_lbl)
-        return torch.cat ([x_raw, x_lbl], dim=1)
-
-class AttU_Net(nn.Module):
-    def __init__(self,in_ch, features, out_ch, split=1):
-        super(AttU_Net,self).__init__()
-        self.name = "AttU_Net"
-        self.Maxpool = nn.MaxPool2d(kernel_size=2,stride=2)
-        self.fuse_in = FuseIn (in_ch, features[0] // 2, split=split)
-        self.Conv1 = Residual_Conv (in_ch=features[0],out_ch=features[0])
-        self.Conv2 = Residual_Conv (in_ch=features[0],out_ch=features[1])
-        self.Conv3 = Residual_Conv (in_ch=features[1],out_ch=features[2])
-        self.Conv4 = Residual_Conv (in_ch=features[2],out_ch=features[3])
-        self.Conv5 = Residual_Conv (in_ch=features[3],out_ch=features[4])
-
-        self.Up5 = UpConv(in_ch=features[4],out_ch=features[3])
-        self.Att5 = Attention_block(F_g=features[3],F_l=features[3],F_int=features[3]//2)
-        self.UpConv5 = Residual_Conv (in_ch=features[4], out_ch=features[3])
-
-        self.Up4 = UpConv(in_ch=features[3],out_ch=features[2])
-        self.Att4 = Attention_block(F_g=features[2],F_l=features[2],F_int=features[2]//2)
-        self.UpConv4 = Residual_Conv (in_ch=features[3], out_ch=features[2])
-        
-        self.Up3 = UpConv(in_ch=features[2],out_ch=features[1])
-        self.Att3 = Attention_block(F_g=features[1],F_l=features[1],F_int=features[1]//2)
-        self.UpConv3 = Residual_Conv (in_ch=features[2], out_ch=features[1])
-        
-        self.Up2 = UpConv(in_ch=features[1],out_ch=features[0])
-        self.Att2 = Attention_block(F_g=features[0],F_l=features[0],F_int=features[0]//2)
-        self.UpConv2 = Residual_Conv (in_ch=features[1], out_ch=features[0])
-
-        self.actor = outconv(features [0], out_ch, kernel_size=1)
-        self.critic = outconv (features [0], 1, kernel_size=1)
-
-
-    def forward(self,x):
-        # encoding path
-        x = self.fuse_in (x)
-        x1 = self.Conv1(x)
-
-        x2 = self.Maxpool(x1)
-        x2 = self.Conv2(x2)
-        
-        x3 = self.Maxpool(x2)
-        x3 = self.Conv3(x3)
-
-        x4 = self.Maxpool(x3)
-        x4 = self.Conv4(x4)
-
-        x5 = self.Maxpool(x4)
-        x5 = self.Conv5(x5)
-
-        # decoding + concat path
-        d5 = self.Up5(x5)
-        x4 = self.Att5(g=d5,x=x4)
-        d5 = torch.cat((x4,d5),dim=1)        
-        d5 = self.UpConv5(d5)
-        
-        d4 = self.Up4(d5)
-        x3 = self.Att4(g=d4,x=x3)
-        d4 = torch.cat((x3,d4),dim=1)
-        d4 = self.UpConv4(d4)
-
-        d3 = self.Up3(d4)
-        x2 = self.Att3(g=d3,x=x2)
-        d3 = torch.cat((x2,d3),dim=1)
-        d3 = self.UpConv3(d3)
-
-        d2 = self.Up2(d3)
-        x1 = self.Att2(g=d2,x=x1)
-        d2 = torch.cat((x1,d2),dim=1)
-        d2 = self.UpConv2(d2)
-
-        actor = self.actor (d2)
-        critic = self.critic (d2)
-        return critic, actor
-
-class ASPPAttU_Net (nn.Module):
-    def __init__(self,in_ch, features, out_ch, atrous_rates = [6, 12, 18], split=1):
-        super(ASPPAttU_Net,self).__init__()
-        self.name = "ASPPAttU_Net"
-        self.Maxpool = nn.MaxPool2d(kernel_size=2,stride=2)
-        self.fuse_in = FuseIn (in_ch, features[0] // 2, split=split)
-        self.Conv1 = Residual_Conv (in_ch=features[0],out_ch=features[0])
-        self.Conv2 = Residual_Conv (in_ch=features[0],out_ch=features[1])
-        self.Conv3 = Residual_Conv (in_ch=features[1],out_ch=features[2])
-        self.Conv4 = Residual_Conv (in_ch=features[2],out_ch=features[3])
-        self.Conv5 = Residual_Conv (in_ch=features[3],out_ch=features[4])
-
-        self.Up5 = UpConv(in_ch=features[4],out_ch=features[3])
-        self.Att5 = Attention_block(F_g=features[3],F_l=features[3],F_int=features[3]//2)
-        self.UpConv5 = Residual_Conv (in_ch=features[4], out_ch=features[3])
-
-        self.Up4 = UpConv(in_ch=features[3],out_ch=features[2])
-        self.Att4 = Attention_block(F_g=features[2],F_l=features[2],F_int=features[2]//2)
-        self.UpConv4 = Residual_Conv (in_ch=features[3], out_ch=features[2])
-        
-        self.Up3 = UpConv(in_ch=features[2],out_ch=features[1])
-        self.Att3 = Attention_block(F_g=features[1],F_l=features[1],F_int=features[1]//2)
-        self.UpConv3 = Residual_Conv (in_ch=features[2], out_ch=features[1])
-        
-        self.Up2 = UpConv(in_ch=features[1],out_ch=features[0])
-        self.Att2 = Attention_block(F_g=features[0],F_l=features[0],F_int=features[0]//2)
-        self.UpConv2 = Residual_Conv (in_ch=features[1], out_ch=features[0])
-
-        self.aspp = ASPP (features[0], features[0], atrous_rates)
-
-        self.actor = outconv(features [0] * (len (atrous_rates) + 1), out_ch, kernel_size=1)
-        self.critic = outconv (features [0] * (len (atrous_rates) + 1), 1, kernel_size=1)
-
-
-    def forward(self,x):
-        # encoding path
-        x = self.fuse_in (x)
-        x1 = self.Conv1(x)
-
-        x2 = self.Maxpool(x1)
-        x2 = self.Conv2(x2)
-        
-        x3 = self.Maxpool(x2)
-        x3 = self.Conv3(x3)
-
-        x4 = self.Maxpool(x3)
-        x4 = self.Conv4(x4)
-
-        x5 = self.Maxpool(x4)
-        x5 = self.Conv5(x5)
-
-        # decoding + concat path
-        d5 = self.Up5(x5)
-        x4 = self.Att5(g=d5,x=x4)
-        d5 = torch.cat((x4,d5),dim=1)        
-        d5 = self.UpConv5(d5)
-        
-        d4 = self.Up4(d5)
-        x3 = self.Att4(g=d4,x=x3)
-        d4 = torch.cat((x3,d4),dim=1)
-        d4 = self.UpConv4(d4)
-
-        d3 = self.Up3(d4)
-        x2 = self.Att3(g=d3,x=x2)
-        d3 = torch.cat((x2,d3),dim=1)
-        d3 = self.UpConv3(d3)
-
-        d2 = self.Up2(d3)
-        x1 = self.Att2(g=d2,x=x1)
-        d2 = torch.cat((x1,d2),dim=1)
-        d2 = self.UpConv2(d2)
-
-        aspp = self.aspp (d2)
-
-        actor = self.actor (aspp)
-        critic = self.critic (aspp)
-
-        return critic, actor
+        if (self.use_lstm):
+            x, (hx, cx) = x
+        x = self.backbone (x)
+        if self.use_lstm:
+            hx, cx = self.lstm (x, (hx, cx))
+            x = hx
+        actor = self.actor (x)
+        critic = self.critic (x)
+        if self.use_lstm:
+            ret = (critic, actor, (hx, cx))
+        else:
+            ret = (critic, actor)
+        return ret
 
 def to_numpy (tensor):
     return tensor.cpu ().numpy ().squeeze ()
@@ -202,20 +65,34 @@ def debug (tensor):
     for i in range (shape [0]):
         print (tensor_np [i])
 
-def get_model (name, input_shape, features, num_actions, split):
+def get_model (args, name, input_shape, features, num_actions, split, atrous_rates=[6, 12, 18], gpu_id=0):
     if name == "AttUNet":
-        model = AttU_Net (input_shape [0], features, num_actions, split=split)
+        model = ActorCritic (args, features [0], AttU_Net (input_shape [0], features, num_actions, split=split), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
+    if name == "AttUNet2":
+        model = ActorCritic (args, features [0], AttU_Net2 (input_shape [0], features, num_actions, split=split), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
+    if name == "ASPPAttUNet2":
+        model = ActorCritic (args, features [0] * (len (atrous_rates) + 1), 
+                                ASPPAttU_Net2 (input_shape [0], features, num_actions, split=split, atrous_rates=atrous_rates), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
     if name == "ASPPAttUNet":
-        model = ASPPAttU_Net (input_shape [0], features, num_actions, split=split)
+        model = ActorCritic (args, features [0] * (len (atrous_rates) + 1), 
+                                ASPPAttU_Net (input_shape [0], features, num_actions, split=split, atrous_rates=atrous_rates), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
     if name == "DeepLab":
-        model = DeepLab(backbone='xception', input_stride=input_shape [0], output_stride=16, split=split, num_classes=num_actions)
+        model = ActorCritic (args, features [0], DeepLab(backbone='xception', input_stride=input_shape [0], output_stride=16, split=split, num_classes=num_actions), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
     return model
 
-# if __name__ == "__main__":
-#     FEATURES = [64, 128, 256, 512, 1024]
-#     # model = UNet (5, features=FEATURES, out_ch=2)
-#     # x = torch.zeros ((1,5,256,256), dtype=torch.float32)
-#     # value, logit = model (x)
+
+def test_models ():
+    FEATURES = [32, 64, 128, 256, 512]
+    model = get_model ("ASPPAttUNet2", (5,256,256), features=FEATURES, num_actions=2, split=3)
+    x = torch.randn ((1,5,256,256), dtype=torch.float32)
+    print (x.shape)    
+    value, logit = model (x)
+    print (logit.shape, value.shape)
     
 #     # curtime = time.time ()
 #     # model = AttU_NetAttU_Net (in_ch=5, features=FEATURES, out_ch=2, split=3)

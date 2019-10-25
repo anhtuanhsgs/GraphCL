@@ -36,6 +36,7 @@ class Agent (object):
         self.cell_probs = []
         self.probs = []
         
+        
 
     def action_lbl_rand (self, lbl, action, eps):
         val_list = np.unique (lbl)
@@ -102,7 +103,7 @@ class Agent (object):
             self.t_gt_lbl = torch.tensor (self.env.gt_lbl, dtype=torch.int32, requires_grad=False).cuda ()
 
     def action_train_gpu (self, use_max=False, use_lbl=False):
-        if "Lstm" in self.args.model:
+        if self.args.lstm_feats:
             value, logit, (self.hx, self.cx) = self.model((Variable(
                 self.state.unsqueeze(0)), (self.hx, self.cx)))
         elif "GRU" in self.args.model:
@@ -150,7 +151,7 @@ class Agent (object):
 
 
     def action_train (self, use_max=False, use_lbl=False, eps=0.15):
-        if "Lstm" in self.args.model:
+        if self.args.lstm_feats:
             value, logit, (self.hx, self.cx) = self.model((Variable(
                 self.state.unsqueeze(0)), (self.hx, self.cx)))
         elif "GRU" in self.args.model:
@@ -198,7 +199,7 @@ class Agent (object):
 
     def action_test (self):
         with torch.no_grad():
-            if "Lstm" in self.args.model:
+            if self.args.lstm_feats:
                 if self.done:
                     if self.gpu_id >= 0:
                         with torch.cuda.device (self.gpu_id):
