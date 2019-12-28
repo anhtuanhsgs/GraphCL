@@ -249,9 +249,8 @@ parser.add_argument (
 parser.add_argument (
     '--data',
     default='snemi',
-    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape"]
+    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape", "cremi"]
 )
-
 parser.add_argument (
     '--SEMI_DEBUG',
     action="store_true"
@@ -416,8 +415,8 @@ def setup_data (args):
         args.testlbl = False
     if args.data == 'kitti':
         path_train = "Data/kitti/train2/"
-        path_valid = "Data/kitti/train/"
-        path_test = "Data/kitti/train/"
+        path_valid = "Data/kitti/train2/"
+        path_test = "Data/kitti/valid/"
         args.data_channel = 3
         args.testlbl = True
     if args.data == 'mnseg2018':
@@ -432,8 +431,14 @@ def setup_data (args):
         path_valid = "../Data/cityscape/valid/"
         args.testlbl = True
         args.data_channel = 3
+    if args.data == "cremi":
+        path_train = "Data/Cremi/train/"
+        path_test = "Data/Cremi/train/"
+        path_valid = "Data/Cremi/train/"
+        args.testlbl = True
+        args.data_channel = 1
 
-    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish']
+    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish', "cremi"]
     
     raw, gt_lbl = get_data (path=path_train, relabel=relabel)
     raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)

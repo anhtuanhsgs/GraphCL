@@ -9,7 +9,7 @@ import time, os
 import logging
 from Utils.Logger import Logger
 from Utils.utils import create_dir
-from Utils.metrics import GetDices, DiffFGLabels
+from Utils.metrics import GetDices, DiffFGLabels, kitti_metric
 from utils import setup_logger, clean_reindex, ScalaTracker
 import numpy as np
 import cv2
@@ -75,9 +75,14 @@ def evaluate (args, env):
     gt_lbl = env.gt_lbl
 
     bestDice, FgBgDice = GetDices (pred_lbl, gt_lbl)
+
     diffFG = DiffFGLabels (pred_lbl, gt_lbl)
 
-    return bestDice, FgBgDice, diffFG 
+    MWCov, MUCov, AvgFP, AvgFN  = kitti_metric(pred_lbl, gt_lbl)
+
+    rand_i = adjusted_rand_index(gt_lbl,pred_lbl)
+
+    return bestDice, FgBgDice, diffFG , MWCov, MUCov, AvgFP, AvgFN, rand_i
 
 
 def test (args, shared_model, env_conf, datasets=None, tests=None):
@@ -97,6 +102,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
         create_dir (args.log_dir + "models/")
 
         os.system ("cp *.py " + args.log_dir)
+        os.system ("cp *.sh " + args.log_dir)
         os.system ("cp models/models.py " + args.log_dir + "models/")
         os.system ("cp models/basic_modules.py " + args.log_dir + "models/")
 
@@ -152,6 +158,14 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
     recent_FgBgDice = ScalaTracker (100)
     recent_bestDice = ScalaTracker (100)
     recent_diffFG = ScalaTracker (100)
+
+    recent_MUCov = ScalaTracker (100)
+    recent_MWCov = ScalaTracker (100)
+    recent_AvgFP = ScalaTracker (100)
+    recent_AvgFN = ScalaTracker (100)
+
+    recent_rand_i = ScalaTracker (100)
+
     renderlist = []
     renderlist.append (player.env.render ())
     max_score = 0
@@ -209,26 +223,46 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                 if tests is not None:
                     inference (args, logger, player.model, tests [0], test_env, gpu_id, player.env.rng, num_tests)
                 if (np.max (env.lbl) != 0 and np.max (env.gt_lbl) != 0):
-                    bestDice, FgBgDice, diffFG = evaluate (args, player.env)
+                    bestDice, FgBgDice, diffFG, MWCov, MUCov, AvgFP, AvgFN, rand_i = evaluate (args, player.env)
+
                     recent_FgBgDice.push (FgBgDice)
                     recent_diffFG.push (abs (diffFG))
                     recent_bestDice.push (bestDice)
 
+                    recent_MWCov.push(MWCov)
+                    recent_MUCov.push (MUCov)
+                    recent_AvgFP.push (AvgFP)
+                    recent_AvgFN.push (AvgFN)
+
+
+                    recent_rand_i.push (rand_i)
+
+
                     log_info = {
-                        "bestDice": recent_FgBgDice.mean (),
-                        "FgBgDice": recent_bestDice.mean (),
-                        "diffFG": recent_diffFG.mean ()
+                        "bestDice": recent_bestDice.mean (),
+                        "FgBgDice": recent_FgBgDice.mean (),
+                        "diffFG": recent_diffFG.mean (),
+                        "MWCov": recent_MWCov.mean(),
+                        "MUCov": recent_MUCov.mean (),
+                        "AvgFP": recent_AvgFP.mean (),
+                        "AvgFN": recent_AvgFN.mean (),
+                        "rand_i": recent_rand_i.mean ()
                     }
 
                     for tag, value in log_info.items ():
                         logger.scalar_summary (tag, value, num_tests)
                 else:
                     bestDice, FgBgDice, diffFG = 0, 0, 0
+                    MWCov, MUCov, AvgFP, AvgFN = 0, 0, 0, 0
+                    rand_i = 0
 
                 print ("----------------------VALID SET--------------------------")
                 print (args.env)
-                print ("bestDice:", bestDice, "FgBgDice:", FgBgDice, "diffFG:", diffFG)
-                print ("mean bestDice")
+                print ("bestDice:", bestDice, "FgBgDice:", FgBgDice, "diffFG:", diffFG,
+                       "MWCov:", MWCov, "MUCov:", MUCov, "AvgFP:", AvgFP, "AvgFN:", AvgFN,
+                       "rand_i:", rand_i
+                       )
+                # print ("mean bestDice")
                 print ("Log test #:", num_tests)
                 print ("rewards: ", player.reward.mean ())
                 print ("sum rewards: ", reward_sum)
@@ -238,7 +272,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                 print (np.concatenate ([values[0][None], values[1][None]], 0))
                 print ("------------------------------------------------")
 
-                # log_img = np.concatenate (renderlist, 0)
+                log_img = np.concatenate (renderlist, 0)
                                 
                 for i in range (3):
                     # if i == 0 and args.seg_scale:
@@ -248,7 +282,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                 probslist = [np.repeat (np.expand_dims (prob, -1),3, -1) for prob in player.probs]
                 probslist = np.concatenate (probslist, 1)
                 probslist = (probslist * 256).astype (np.uint8, copy=False)
-                log_img = renderlist [-1]
+                # log_img = renderlist [-1]
                 log_img = np.concatenate ([log_img, probslist], 0)
 
                 log_info = {"valid_sample": log_img}

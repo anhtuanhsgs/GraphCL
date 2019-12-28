@@ -68,7 +68,7 @@ class General_env (gym.Env):
                             A.GridDistortion(p=0.9, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
                             A.OpticalDistortion(p=0.9, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
                             ], p=0.7),
-                        A.ShiftScaleRotate (p=0.7, shift_limit=0.2, rotate_limit=0, interpolation=cv2.INTER_NEAREST, scale_limit=(0.7, 0.7), border_mode=cv2.BORDER_CONSTANT),
+                        A.ShiftScaleRotate (p=0.7, shift_limit=0.2, rotate_limit=10, interpolation=cv2.INTER_NEAREST, scale_limit=(-0.4, 0.4), border_mode=cv2.BORDER_CONSTANT),
                         A.RandomBrightness (p=0.7, limit=0.5),
                         A.RandomContrast (p=0.5),
                         A.GaussNoise (p=0.5),
@@ -86,7 +86,7 @@ class General_env (gym.Env):
                                 A.GridDistortion(p=0.9, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
                                 A.OpticalDistortion(p=0.9, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
                                 ], p=0.7),
-                            A.ShiftScaleRotate (p=0.7, shift_limit=0.3, rotate_limit=90, interpolation=cv2.INTER_NEAREST, scale_limit=(0.3, 0.5), border_mode=cv2.BORDER_CONSTANT),
+                            A.ShiftScaleRotate (p=0.7, shift_limit=0.3, rotate_limit=180, interpolation=cv2.INTER_NEAREST, scale_limit=(-0.3, 0.5), border_mode=cv2.BORDER_CONSTANT),
                             A.CLAHE(p=0.3),
                             A.RandomBrightness (p=0.7, limit=0.5),
                             A.RandomContrast (p=0.5),
@@ -105,7 +105,7 @@ class General_env (gym.Env):
                             A.GridDistortion(p=0.5, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
                             A.OpticalDistortion(p=0.5, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
                             ], p=0.6),
-                        A.ShiftScaleRotate (p=0.5, shift_limit=0.3, rotate_limit=90, interpolation=cv2.INTER_NEAREST, scale_limit=(0.1, 0.2), border_mode=cv2.BORDER_CONSTANT),
+                        A.ShiftScaleRotate (p=0.5, shift_limit=0.3, rotate_limit=180, interpolation=cv2.INTER_NEAREST, scale_limit=(-0.2, 0.2), border_mode=cv2.BORDER_CONSTANT),
                         # A.CLAHE(p=0.3),
                         randomBrightness,
                         RandomContrast,
@@ -113,7 +113,7 @@ class General_env (gym.Env):
                         A.Blur (p=0.3, blur_limit=4),
                         ]
                     )
-
+        aug = A.Compose ([])
         ret = aug (image=image, mask=mask)
         return ret ['image'], ret ['mask']
 
