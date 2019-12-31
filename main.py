@@ -216,7 +216,7 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=["AttUNet", "ASPPAttUNet", "DeepLab", "ASPPAttUNet2", "AttUNet2"]
+    choices=["AttUNet", "ASPPAttUNet", "DeepLab", "ASPPAttUNet2", "AttUNet2", "AttUNet3"]
 )
 
 parser.add_argument (

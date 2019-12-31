@@ -8,7 +8,7 @@ import numpy as np
 import time
 from .basic_modules import *
 from .modeling.deeplab import DeepLab
-from .att_unet import AttU_Net2, AttU_Net
+from .att_unet import AttU_Net2, AttU_Net, AttU_Net3
 from .aspp_att_unet import ASPPAttU_Net2, ASPPAttU_Net
 
 class outconv(nn.Module):
@@ -72,6 +72,9 @@ def get_model (args, name, input_shape, features, num_actions, split, atrous_rat
     if name == "AttUNet2":
         model = ActorCritic (args, features [0], AttU_Net2 (input_shape [0], features, num_actions, split=split), 
                                     out_ch=num_actions, gpu_id=gpu_id)
+    if name == "AttUNet3":
+        model = ActorCritic (args, features [0], AttU_Net3 (input_shape [0], features, num_actions, split=split), 
+                                    out_ch=num_actions, gpu_id=gpu_id)
     if name == "ASPPAttUNet2":
         model = ActorCritic (args, features [0] * (len (atrous_rates) + 1), 
                                 ASPPAttU_Net2 (input_shape [0], features, num_actions, split=split, atrous_rates=atrous_rates), 
@@ -87,7 +90,7 @@ def get_model (args, name, input_shape, features, num_actions, split, atrous_rat
 
 
 def test_models ():
-    FEATURES = [32, 64, 128, 256, 512]
+    FEATURES = [16, 32, 64, 64, 128, 128, 256]
     model = get_model ("ASPPAttUNet2", (5,256,256), features=FEATURES, num_actions=2, split=3)
     x = torch.randn ((1,5,256,256), dtype=torch.float32)
     print (x.shape)    
