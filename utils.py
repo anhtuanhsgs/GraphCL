@@ -88,7 +88,7 @@ def ensure_shared_grads(model, shared_model, gpu=False):
                                    shared_model.parameters()):
         if shared_param.grad is not None and not gpu:
             return
-        if param.grad is None:  
+        if param.grad is None:
             shared_param._grad = None
         elif not gpu:
             shared_param._grad = param.grad

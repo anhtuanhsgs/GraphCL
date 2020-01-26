@@ -5,7 +5,7 @@ import numpy as np
 from collections import deque
 from gym.spaces.box import Box
 
-from skimage.measure import label
+from skimage.measure import label, block_reduce
 from skimage.morphology import disk
 from skimage.morphology import binary_dilation
 
@@ -65,7 +65,7 @@ class General_env (gym.Env):
                         A.HorizontalFlip (p=0.5),
                         A.OneOf([
                             A.ElasticTransform(p=0.9, alpha=1, sigma=5, alpha_affine=5, interpolation=cv2.INTER_NEAREST),
-                            A.GridDistortion(p=0.9, interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),
+                     
                             A.OpticalDistortion(p=0.9, distort_limit=(0.2, 0.2), shift_limit=(0, 0), interpolation=cv2.INTER_NEAREST, border_mode=cv2.BORDER_CONSTANT),                 
                             ], p=0.7),
                         A.ShiftScaleRotate (p=0.7, shift_limit=0.2, rotate_limit=10, interpolation=cv2.INTER_NEAREST, scale_limit=(-0.4, 0.4), border_mode=cv2.BORDER_CONSTANT),
@@ -113,12 +113,24 @@ class General_env (gym.Env):
                         A.Blur (p=0.3, blur_limit=4),
                         ]
                     )
-        aug = A.Compose ([])
-        ret = aug (image=image, mask=mask)
+        if self.config ["DEBUG"]:
+            aug = A.Compose ([])
+
+        ret = aug (image=image, mask=mask)        
+
         return ret ['image'], ret ['mask']
 
+    def highres_action (self, action):
+        return cv2.resize (action, (self.size [1], self.size[0]), interpolation=cv2.INTER_NEAREST)
+
+    def lowres_reward (self, reward):
+        return block_reduce (reward, (2, 2), np.mean)
+
     def step_inference (self, action):
+        if self.config ["lowres"]:
+            action = self.highres_action (action)
         self.action = action
+        
         self.new_lbl = self.lbl + action * (2 ** self.step_cnt)
         self.lbl = self.new_lbl
         done = False
@@ -129,11 +141,17 @@ class General_env (gym.Env):
         self.step_cnt += 1
         if self.step_cnt >= self.T:
             done = True
+
+        if self.config ["lowres"]:
+            reward = self.lowres_reward (reward)
         ret = (self.observation (), reward, done, info)
         return ret
 
     def step (self, action):
+        if self.config ["lowres"]:
+            action = self.highres_action (action)
         self.action = action
+        
         self.new_lbl = self.lbl + action * (2 ** self.step_cnt)
         done = False
 
@@ -146,6 +164,8 @@ class General_env (gym.Env):
             self.step_cnt += 1
             self.rewards.append (reward)    
             self.sum_reward += reward
+            if self.config ["lowres"]:
+                reward = self.lowres_reward (reward)
             ret = (self.observation (), reward, done, info)
             return ret
 
@@ -184,6 +204,8 @@ class General_env (gym.Env):
         self.sum_reward += reward
         if self.step_cnt >= self.T:
             done = True
+        if self.config ["lowres"]:
+            reward = self.lowres_reward (reward)
         ret = (self.observation (), reward, done, info)
         return ret
 
@@ -206,7 +228,7 @@ class General_env (gym.Env):
             self.inrs = []
 
             for radius in self.config ["out_radius"]:
-                self.bdrs += [[seg ^ budget_binary_dilation (seg, radius) for seg in self.segs]]
+                self.bdrs += [[seg ^ budget_binary_dilation (seg, radius, fac=self.config["dilate_fac"]) for seg in self.segs]]
             for radius in self.config ["in_radius"]:
                 self.inrs += [[budget_binary_erosion (seg, radius, minsize=self.config["minsize"]) for seg in self.segs]]
             # self.inrs = [seg for seg in self.segs]

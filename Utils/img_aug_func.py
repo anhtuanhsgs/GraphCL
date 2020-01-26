@@ -58,7 +58,8 @@ def read_im (paths):
         if ".tif" in path:
             ret.append (io.imread (path))
         elif ".npy" in path:
-            vol = np.load (path)
+            print (path)
+            vol = np.load (path, allow_pickle=True)
             ret += [vol.tolist ()]
 
     return ret

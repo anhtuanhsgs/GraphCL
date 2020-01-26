@@ -194,7 +194,8 @@ class FuseIn (nn.Module):
         return torch.cat ([x_raw, x_lbl], dim=1)
 
 class FuseIn2 (nn.Module):
-    def __init__ (self, in_ch, out_ch, split=1, rates=[1,6,12,18]):
+    # modified 01/20
+    def __init__ (self, in_ch, out_ch, split=1, rates=[1,6,12]):
         super (FuseIn2, self).__init__ ()
         self.split = split
         aspp_out_ch = 8
@@ -333,6 +334,25 @@ class NoisyConv2d(Module):
             s += ', bias=False'
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
+
+class GCN(nn.Module):
+    def __init__(self,in_ch, out_ch,k=7): #out_Channel=21 in paper
+        super(GCN, self).__init__()
+        self.conv_l1 = nn.Conv2d(in_ch, out_ch, kernel_size=(k,1), padding =((k-1)//2,0))
+        self.conv_l2 = nn.Conv2d(out_ch, out_ch, kernel_size=(1,k), padding =(0,(k-1)//2))
+        self.conv_r1 = nn.Conv2d(in_ch, out_ch, kernel_size=(1,k), padding =((k-1)//2,0))
+        self.conv_r2 = nn.Conv2d(out_ch, out_ch, kernel_size=(k,1), padding =(0,(k-1)//2))
+        
+    def forward(self, x):
+        x_l = self.conv_l1(x)
+        x_l = self.conv_l2(x_l)
+        
+        x_r = self.conv_r1(x)
+        x_r = self.conv_r2(x_r)
+        
+        x = x_l + x_r
+        
+        return x
 
 def test_models ():
     # features = [16, 32, 64, 128]

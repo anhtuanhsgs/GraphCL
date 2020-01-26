@@ -86,14 +86,16 @@ class AttU_Net(nn.Module):
         d2 = torch.cat((x1,d2),dim=1)
         d2 = self.UpConv2(d2)
 
-        return d2 
+        return d2
 
 class AttU_Net3 (nn.Module):
-    def __init__ (self, in_ch, features, out_ch, split=1):
+    def __init__ (self, in_ch, features, out_ch, split=1, level=0, multi=1):
         super (AttU_Net3, self).__init__ ()
         self.name = "AttU_Net"
+        self.level = level
         self.Maxpool = nn.MaxPool2d (kernel_size=2, stride=2)
         self.fuse_in = FuseIn2(in_ch, features[0] // 2, split=split)
+        self.multi = multi
 
         self.encode_layeres = nn.ModuleList ([Residual_Conv(in_ch=features[0], out_ch=features[0])])
         for i in range (len (features) - 1):
@@ -126,14 +128,21 @@ class AttU_Net3 (nn.Module):
             ds[-1] = torch.cat ((xs[-level-1], ds[-1]), dim=1)
             ds[-1] = self.decode_layers [i+2] (ds[-1])
             level += 1
-
-        return ds[-1]
+        
+        ret = []
+        for i in range (self.multi):
+            ret += [ds [-self.level-i-1]]
+        if self.multi == 1:
+            return ds[-1]
+        return ret
 
 
 class AttU_Net2(nn.Module):
-    def __init__(self, in_ch, features, out_ch, split=1):
+    def __init__(self, in_ch, features, out_ch, split=1, level=0, multi=1):
         super(AttU_Net2, self).__init__()
+        self.multi = multi
         self.name = "AttU_Net"
+        self.level = level
         self.Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.fuse_in = FuseIn2(in_ch, features[0] // 2, split=split)
 
@@ -142,11 +151,6 @@ class AttU_Net2(nn.Module):
         self.Conv3 = Residual_Conv(in_ch=features[1], out_ch=features[2])
         self.Conv4 = Residual_Conv(in_ch=features[2], out_ch=features[3])
         self.Conv5 = Residual_Conv(in_ch=features[3], out_ch=features[4])
-        self.Conv6 = Residual_Conv(in_ch=features[4], out_ch=features[5])
-
-        self.Up6 = UpConv(in_ch=features[5], out_ch=features[4])
-        self.Att6 = Attention_block(F_g=features[4], F_l=features[4], F_int=features[4] // 2)
-        self.UpConv6 = Residual_Conv(in_ch=features[4] * 2, out_ch=features[4])
 
         self.Up5 = UpConv(in_ch=features[4], out_ch=features[3])
         self.Att5 = Attention_block(F_g=features[3], F_l=features[3], F_int=features[3] // 2)
@@ -181,20 +185,11 @@ class AttU_Net2(nn.Module):
         x5 = self.Maxpool(x4)
         x5 = self.Conv5(x5)
 
-        x6 = self.Maxpool(x5)
-        x6 = self.Conv6(x6)
-
         # ------------------------------
         # decoding + concat path
         # ------------------------------
 
-        
-        d6 = self.Up6(x6)
-        x5 = self.Att6(g=d6, x=x5)
-        d6 = torch.cat((x5, d6), dim=1)
-        d6 = self.UpConv6(d6)
-
-        d5 = self.Up5(d6)
+        d5 = self.Up5(x5)
         x4 = self.Att5(g=d5, x=x4)
         d5 = torch.cat((x4, d5), dim=1)
         d5 = self.UpConv5(d5)
@@ -214,7 +209,16 @@ class AttU_Net2(nn.Module):
         d2 = torch.cat((x1, d2), dim=1)
         d2 = self.UpConv2(d2)
 
-        return d2
+        _ret = [d5, d4, d3, d2]
+
+        if self.multi==1:
+            return d2
+        return _ret [-self.multi:][::-1]
+
+        if self.level==0:
+            return d2
+        if self.level==1:
+            return d3;
 
 def test_models ():
     FEATURES = [32, 64, 64, 128, 128, 256]

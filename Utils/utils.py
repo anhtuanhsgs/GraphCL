@@ -56,7 +56,7 @@ def relabel (lbl):
         cur_max_val = np.max (ret)
     return ret
 
-def budget_binary_dilation (img, radius, fac=2):
+def budget_binary_dilation (img, radius, fac=3):
 
     if radius < 0:
         return np.ones (img.shape, dtype=np.bool)

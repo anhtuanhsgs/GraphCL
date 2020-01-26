@@ -40,7 +40,7 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
     player = Agent (None, env, args, None)
     player.gpu_id = gpu_id
     player.model = get_model (args, args.model, env.observation_space.shape, args.features, 
-                            atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, gpu_id=gpu_id)
+                            atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, gpu_id=gpu_id, multi=args.multi)
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
 
@@ -101,6 +101,9 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
                     player.state = player.state.cuda ()
 
         R = torch.zeros (1, 1, env_conf ["size"][0], env_conf ["size"][1])
+        if args.lowres:
+            R = torch.zeros (1, 1, env_conf ["size"][0] // 2, env_conf ["size"][1] // 2)
+
         if not player.done:
             if args.lstm_feats:
                 value, _, _ = player.model((Variable(player.state.unsqueeze(0)), (player.hx, player.cx)))
@@ -117,6 +120,8 @@ def train (rank, args, shared_model, optimizer, env_conf, datasets=None):
         value_loss = 0
         
         gae = torch.zeros(1, 1, env_conf ["size"][0], env_conf ["size"][1])
+        if args.lowres:
+            gae = torch.zeros (1, 1, env_conf ["size"][0] // 2, env_conf ["size"][1] // 2)
         if gpu_id >= 0:
             with torch.cuda.device(gpu_id):
                 gae = gae.cuda()

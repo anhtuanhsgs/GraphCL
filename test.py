@@ -100,11 +100,11 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
         logger = Logger (args.log_dir)
 
         create_dir (args.log_dir + "models/")
+        create_dir (args.log_dir + "tifs/")
 
         os.system ("cp *.py " + args.log_dir)
         os.system ("cp *.sh " + args.log_dir)
-        os.system ("cp models/models.py " + args.log_dir + "models/")
-        os.system ("cp models/basic_modules.py " + args.log_dir + "models/")
+        os.system ("cp models/*.py " + args.log_dir + "models/")
 
         setup_logger ('{}_log'.format (args.env), r'{0}{1}_log'.format (args.log_dir, args.env))
         log['{}_log'.format(args.env)] = logging.getLogger('{}_log'.format(
@@ -140,7 +140,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
     player = Agent (None, env, args, None)
     player.gpu_id = gpu_id
     player.model = get_model (args, args.model, env_conf ["observation_shape"], args.features, 
-                            atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, gpu_id=gpu_id)
+                            atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, gpu_id=gpu_id, multi=args.multi)
 
     player.state = player.env.reset ()
     player.state = torch.from_numpy (player.state).float ()
@@ -283,9 +283,12 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                 probslist = np.concatenate (probslist, 1)
                 probslist = (probslist * 256).astype (np.uint8, copy=False)
                 # log_img = renderlist [-1]
-                log_img = np.concatenate ([log_img, probslist], 0)
+                # log_img = np.concatenate ([log_img, probslist], 0)
 
                 log_info = {"valid_sample": log_img}
+
+                print (log_img.shape)
+                io.imsave (args.log_dir + "tifs/" + "sample.tif", log_img.astype (np.uint8))
 
                 if args.seg_scale:
                     log_info ["scaler"] = player.env.scaler

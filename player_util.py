@@ -41,6 +41,8 @@ class Agent (object):
     def action_lbl_rand (self, lbl, action, eps):
         val_list = np.unique (lbl)
         ret = np.zeros_like (action)
+        if self.env.config ["lowres"]:
+            lbl = lbl [::2, ::2]
 
         for val in val_list:
             if (val == 0):
@@ -60,17 +62,19 @@ class Agent (object):
             single_cell_area = np.count_nonzero (single_cell_map)
             action_tmp = action * single_cell_map
             action_1_count = np.count_nonzero (action_tmp)
-            ratio = action_1_count / single_cell_area
+            ratio = action_1_count / (single_cell_area + 1)
             ratio = np.clip (ratio, eps, 1.0-eps)
             sample = self.env.rng.rand ()
             if (sample < ratio):
                 ret += single_cell_map
         
         self.action = ret
+
         ret = torch.from_numpy (ret [::]).long ().unsqueeze(0).unsqueeze(0)
         if self.gpu_id >= 0:
             with torch.cuda.device(self.gpu_id):
                 ret = ret.cuda()
+
         return ret
 
     #Operation on GPU
@@ -150,7 +154,7 @@ class Agent (object):
         return self
 
 
-    def action_train (self, use_max=False, use_lbl=False, eps=0.15):
+    def action_train (self, use_max=False, use_lbl=False, eps=0.99):
         if self.args.lstm_feats:
             value, logit, (self.hx, self.cx) = self.model((Variable(
                 self.state.unsqueeze(0)), (self.hx, self.cx)))

@@ -216,7 +216,8 @@ parser.add_argument (
 parser.add_argument (
     '--model',
     default='UNet',
-    choices=["AttUNet", "ASPPAttUNet", "DeepLab", "ASPPAttUNet2", "AttUNet2", "AttUNet3"]
+    choices=["AttUNet", "ASPPAttUNet", "DeepLab", "ASPPAttUNet2", 
+                        "AttUNet2", "AttUNet3", "GCNAttUNet"]
 )
 
 parser.add_argument (
@@ -249,7 +250,7 @@ parser.add_argument (
 parser.add_argument (
     '--data',
     default='snemi',
-    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape", "cremi"]
+    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape", "cremi", "ctDNA"]
 )
 parser.add_argument (
     '--SEMI_DEBUG',
@@ -333,6 +334,23 @@ parser.add_argument (
     nargs='+'
 )
 
+parser.add_argument (
+    '--dilate-fac',
+    type=int,
+    default=2
+)
+
+parser.add_argument (
+    '--lowres',
+    action="store_true"
+)
+
+parser.add_argument (
+    '--multi',
+    type=int,
+    default=1,
+)
+
 def setup_env_conf (args):
 
     env_conf = {
@@ -357,7 +375,9 @@ def setup_env_conf (args):
         "use_masks": args.use_masks,
         "seg_scale": args.seg_scale,
         "DEBUG": args.DEBUG,
+        "dilate_fac": args.dilate_fac,
 
+        "lowres": args.lowres,
     }
 
     env_conf ["observation_shape"] = [args.data_channel + 1] + env_conf ["size"]
@@ -437,8 +457,14 @@ def setup_data (args):
         path_valid = "Data/Cremi/train/"
         args.testlbl = True
         args.data_channel = 1
+    if args.data == "ctDNA":
+        path_train = "Data/ctDNA/train/"
+        path_test = "Data/ctDNA/train/"
+        path_valid = "Data/ctDNA/train/"
+        args.testlbl = True
+        args.data_channel = 3
 
-    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish', "cremi"]
+    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish', "cremi", "ctDNA"]
     
     raw, gt_lbl = get_data (path=path_train, relabel=relabel)
     raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)
@@ -450,8 +476,9 @@ def setup_data (args):
 
     if (args.DEBUG):
         size = args.size [0] * args.downsample
-        raw = raw[20:21,30:30+size,30:30+size]
-        gt_lbl = gt_lbl [20:21,30:30+size,30:30+size]
+        print (raw[0].shape)
+        raw = [raw [20] [30:30+size,30:30+size]]
+        gt_lbl = [gt_lbl [20] [30:30+size,30:30+size]]
         raw_valid = np.copy (raw)
         gt_lbl_valid = np.copy (gt_lbl)
 
@@ -490,7 +517,7 @@ if __name__ == '__main__':
     env_conf = setup_env_conf (args)
 
     shared_model = get_model (args, args.model, env_conf ["observation_shape"], args.features, 
-                        atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel)
+                        atrous_rates=args.atr_rate, num_actions=2, split=args.data_channel, multi=args.multi)
 
     if args.load:
         saved_state = torch.load(
