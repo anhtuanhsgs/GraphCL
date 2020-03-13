@@ -84,7 +84,7 @@ def budget_binary_erosion (img, fac, minsize=20):
         inr = binary_erosion (inr)
         sqr_area = m.sqrt (np.count_nonzero (inr))
         cnt += 1
-    return inr [1:-1,1:-1]
+    return inr [1:-1,1:-1]    
 
 def resize_volume (vol, size, ds):
     if ds <= 0: 

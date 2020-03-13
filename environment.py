@@ -37,6 +37,7 @@ class General_env (gym.Env):
         self.split_radius = config ["split_radius"]
         self.merge_speed = config ["merge_speed"]
         self.split_speed = config ["split_speed"]
+        self.tempT = config ["tempT"]
         self.size = config ["size"]
         if config ["use_lbl"]:
             self.observation_space = Box (0, 1.0, shape=[config["observation_shape"][0]] + self.size, dtype=np.float32)
@@ -54,10 +55,10 @@ class General_env (gym.Env):
         
         if self.config ["data"] == "zebrafish":
             randomBrightness =  A.RandomBrightness (p=0.3, limit=0.1)
-            RandomContrast = A.RandomContrast (p=0.1)
+            RandomContrast = A.RandomContrast (p=0.1, limit=0.1)
         else:
-            randomBrightness = A.RandomBrightness (p=0.7, limit=0.5)
-            RandomContrast = A.RandomContrast (p=0.5)
+            randomBrightness = A.RandomBrightness (p=0.7, limit=0.1)
+            RandomContrast = A.RandomContrast (p=0.5, limit=0.1)
 
         if image.shape [-1] == 3:
             if self.config ["data"] in ["Cityscape", "kitti"]:
@@ -113,7 +114,7 @@ class General_env (gym.Env):
                         A.Blur (p=0.3, blur_limit=4),
                         ]
                     )
-        if self.config ["DEBUG"]:
+        if self.config ["DEBUG"] or self.config ["no_aug"]:
             aug = A.Compose ([])
 
         ret = aug (image=image, mask=mask)        
@@ -178,23 +179,33 @@ class General_env (gym.Env):
         merge_reward = np.zeros (self.size, dtype=np.float32)
         split_reward_inr = np.zeros (self.size, dtype=np.float32)
 
+        merge_ratio = np.zeros (self.size, dtype=np.float32)
+        split_ratio = np.zeros (self.size, dtype=np.float32)
+
+        range_split = 2.0 * 2 * len (self.bdrs) * self.config ["spl_w"] 
+        range_merge = 2.0 * 2 * len (self.inrs) * self.config ["mer_w"] 
+
         if self.config ["reward"] == "seg":
-            if self.config ["seg_scale"]:
-                scaler = self.scaler
-            else:
-                scaler = None
+            scaler = None
             # print (len (self.bdrs [1]), len (self.bdrs [0]), len (np.unique (self.gt_lbl)), len (self.segs), len (self.inrs))
             # while (True):
             #     pass
             for i in range (len (self.bdrs)):
                 split_reward += split_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs [0], self.inrs [0], self.bdrs [i], self.T, scaler)
+                # split_reward += split_reward_ins (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs [0], self.inrs [0], self.bdrs [i], self.T, scaler)
             for i in range (len (self.inrs)):
                 merge_reward += merge_reward_s (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [i], self.bdrs [0], self.T, scaler)
+                # merge_reward += merge_reward_step (action, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [0], self.bdrs [0], self.T, scaler)
             # merge_reward += merge_pen_action (action, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [0], self.bdrs [0], self.T, scaler)
             # split_reward += split_rew_action (action, self.gt_lbl, self.step_cnt==0, self.segs, self.inrs [0], self.bdrs [0], self.T, scaler)
             
             # split_reward_inr += split_reward_s_onlyInr (self.lbl, self.new_lbl, self.gt_lbl, self.step_cnt==0, self.inrs, self.inrs, self.bdrs, self.T, scaler)
             reward += self.config ["spl_w"] * split_reward + self.config ["mer_w"] * merge_reward #+ split_reward * merge_reward`
+            merge_ratio += ((merge_reward )   / range_merge) * (self.gt_lbl > 0)
+            split_ratio += ((split_reward )   / range_split) * (self.gt_lbl > 0)
+
+        self.split_ratio_sum = self.split_ratio_sum + split_ratio
+        self.merge_ratio_sum = self.merge_ratio_sum + merge_ratio
 
         self.lbl = self.new_lbl
         self.step_cnt += 1
@@ -202,7 +213,7 @@ class General_env (gym.Env):
         #Reward
         self.rewards.append (reward)    
         self.sum_reward += reward
-        if self.step_cnt >= self.T:
+        if self.step_cnt >= min (self.tempT, self.T):
             done = True
         if self.config ["lowres"]:
             reward = self.lowres_reward (reward)
@@ -211,6 +222,22 @@ class General_env (gym.Env):
 
     def unique (self):
         return np.unique (self.lbl, return_counts=True)
+
+    def random_init_lbl (self):
+        if (self.T0 == 0):
+            return
+        action = self.gt_lbl > 0
+        self.step (action)
+        for t in range (1, self.T0):
+            action = np.zeros_like (self.lbl)
+            for i in np.unique (self.gt_lbl):
+                if i == 0:
+                    continue
+                action += (self.gt_lbl == i) * self.rng.randint (0, 2)
+            if self.type == "train":
+                self.step (action)
+            else:
+                self.step_inference (action)
 
     def reset_end (self):
         """
@@ -221,8 +248,8 @@ class General_env (gym.Env):
         if self.config ["reward"] == "density":
             self.density = density_map (self.gt_lbl)
         elif self.config ["reward"] == "seg" and self.type == "train":
-
             self.gt_lbl = relabel (reorder_label (self.gt_lbl))
+            idx_list = np.unique (self.gt_lbl)
             self.segs = [self.gt_lbl == idx for idx in np.unique (self.gt_lbl)]
             self.bdrs = []
             self.inrs = []
@@ -231,22 +258,12 @@ class General_env (gym.Env):
                 self.bdrs += [[seg ^ budget_binary_dilation (seg, radius, fac=self.config["dilate_fac"]) for seg in self.segs]]
             for radius in self.config ["in_radius"]:
                 self.inrs += [[budget_binary_erosion (seg, radius, minsize=self.config["minsize"]) for seg in self.segs]]
-            # self.inrs = [seg for seg in self.segs]
 
-            if self.config ["seg_scale"]:
-                self.scaler = np.zeros (self.gt_lbl.shape, dtype=np.float32)
-                for value in np.unique (self.gt_lbl):
-                    if (value == 0):
-                        continue;
-                    seg = self.gt_lbl == value
-                    area = np.sqrt (np.count_nonzero (seg))
-                    max_area = np.sqrt (self.gt_lbl.shape [0] * self.gt_lbl.shape [1])
-                    _area =  max_area - area
-                    self.scaler += (seg *  - np.log (area / max_area))
-                self.scaler += 1 - (self.gt_lbl > 0)   
+            # self.inrs = [seg for seg in self.segs]
         else:
             self.density = np.ones (self.size, dtype=np.float32)
-            
+
+        self.random_init_lbl ()
 
     def first_step_reward (self, density=None):
         reward = np.zeros (self.size, dtype=np.float32)
@@ -255,8 +272,7 @@ class General_env (gym.Env):
         reward += ((self.new_lbl == 0) & (self.gt_lbl == 0)) * (st_foregr_ratio)
         reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1.0 - st_foregr_ratio)
         reward -= ((self.new_lbl != 0) & (self.gt_lbl == 0)) * (st_foregr_ratio)
-        if self.config ["seg_scale"]:
-            reward *= self.scaler
+
         return reward
 
     def fgbg_reward (self, scaler=None):
@@ -268,8 +284,7 @@ class General_env (gym.Env):
         # foregr reward, penalty
         reward += ((self.new_lbl != 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
         reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
-        if self.config ["seg_scale"]:
-            reward *= self.scaler
+
         return reward
 
     def background_reward (self, last_step):
@@ -278,8 +293,7 @@ class General_env (gym.Env):
         if last_step:
             reward += ((self.new_lbl == 0) & (self.gt_lbl == 0)) * foregr_ratio
         reward -= ((self.new_lbl != 0) & (self.lbl == 0) & (self.gt_lbl == 0)) * foregr_ratio
-        if self.config ["seg_scale"]:
-            reward *= self.scaler
+
         return reward   
     
     def foreground_reward (self, last_step):
@@ -288,8 +302,7 @@ class General_env (gym.Env):
         reward += ((self.new_lbl != 0) & (self.lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
         if last_step:
             reward -= ((self.new_lbl == 0) & (self.gt_lbl != 0)) * (1 - foregr_ratio)
-        if self.config ["seg_scale"]:
-            reward *= self.scaler
+
         return reward
 
     def observation (self):
@@ -346,9 +359,18 @@ class General_env (gym.Env):
         while (len (rewards) < self.T + 1):
             rewards.append (np.zeros_like (rewards [0]))
 
+
+        split_ratio_sum = np.repeat (np.expand_dims ((self.split_ratio_sum * 255).astype (np.uint8), -1), 3, -1)
+        merge_ratio_sum = np.repeat (np.expand_dims ((self.merge_ratio_sum * 255).astype (np.uint8), -1), 3, -1)
+
+
         line1 = [raw, lbl,gt_lbl, ] + masks
         while (len (rewards) < len (line1)):
             rewards = [np.zeros_like (rewards [-1])] + rewards
+
+        rewards[0] = split_ratio_sum
+        rewards[1] = merge_ratio_sum
+
         line1 = np.concatenate (line1, 1)
         line2 = np.concatenate (rewards, 1)
         ret = np.concatenate ([line1, line2], 0)
@@ -373,8 +395,8 @@ class EM_env (General_env):
             ret += [img[y0:y0+size[0], x0:x0+size[1]]]
         return ret
 
-
     def reset (self, model=None, gpu_id=0):
+        self.T0 = self.config ["T0"]
         self.step_cnt = 0
         z0 = self.rng.randint (0, len (self.raw_list))
         self.raw = np.array (self.raw_list [z0], copy=True)
@@ -384,6 +406,10 @@ class EM_env (General_env):
             self.gt_lbl = np.zeros_like (self.raw)
         columns = 2
         rows = 2
+
+        self.split_ratio_sum = (np.zeros (self.size, dtype=np.float32) + 0.5) * (self.gt_lbl > 0)
+        self.merge_ratio_sum = (np.zeros (self.size, dtype=np.float32) + 0.5) * (self.gt_lbl > 0)
+
         # print (self.raw.dtype)
         # fig=plt.figure(figsize=(8, 8))
         # fig.add_subplot(rows, columns, 1)
@@ -415,6 +441,7 @@ class EM_env (General_env):
 
     def set_sample (self, idx, resize=False):
         self.step_cnt = 0
+        self.T0 = self.config ["T0"]
         z0 = idx
         while (self.raw_list [z0].shape [0] < self.size [0] \
             or self.raw_list [z0].shape [1] < self.size [1]):
@@ -425,6 +452,8 @@ class EM_env (General_env):
         else:
             self.gt_lbl = np.zeros (self.size, dtype=np.int32)
 
+        self.split_ratio_sum = (np.zeros (self.size, dtype=np.float32) + 0.5) * (self.gt_lbl > 0)
+        self.merge_ratio_sum = (np.zeros (self.size, dtype=np.float32) + 0.5) * (self.gt_lbl > 0)
 
         # print (self.raw.shape, self.gt_lbl.shape)
 

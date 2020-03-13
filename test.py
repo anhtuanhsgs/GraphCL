@@ -14,32 +14,64 @@ from utils import setup_logger, clean_reindex, ScalaTracker
 import numpy as np
 import cv2
 import skimage.io as io
+from datetime import datetime
 
-def inference (args, logger, model, tests, test_env, gpu_id, rng, iter):
+
+def inference (args, logger, model, tests, test_env, gpu_id, rng, iter, upsize_lbl=None):
     log_img = []
-    idxs = []
-    if (len (tests) <= 40):
-        idxs.append (0)
-    else:
-        idxs.append (rng.randint (len (tests)))
+    render_imgs = []
 
-    for i in range (min (len (tests), 33)):
-        idxs.append ((idxs [-1] + 1) % len (tests))
+    if args.data in ['cvppp_eval']:
+        original_size = (512, 512)
+    elif args.data in ['kitti']:
+        original_size = (1224, 370)
 
-    if args.data in ['cvppp']:
-        resize = True
+    # indices testset
+    if args.deploy:
+        idxs = np.arange(len(tests)).tolist()
     else:
-        resize = False
+        idxs = []
+        if (len (tests) <= 40):
+            idxs.append (0)
+        else:
+            idxs.append (rng.randint (len (tests)))
+
+        for _ in range (min (len (tests), 33)):
+            idxs.append ((idxs [-1] + 1) % len (tests))
+
+    # if args.data in ['cvppp']:
+    #     resize = True
+    # else:
+    #     resize = False
 
     if args.deploy:
         ret = []
+        # ---------- Define Evaluating Variables ----------
+        # CVPPP
+        bestDices = []
+        FgBgDices = []
+        diffFGs = []
 
-    for i in idxs:
-        obs = test_env.set_sample (i, resize)
+        # Kitti
+        MUCovs = []
+        MWCovs = []
+        AvgFPs = []
+        AvgFNs = []
+
+        rand_is = []
+        # ----------End Define Evaluating Variables ----------
+
+    eval_times = []
+
+    for idx in idxs:
+        # obs = test_env.set_sample (idx, resize)
+        obs = test_env.set_sample (idx)
+        render_img = [np.repeat (np.expand_dims (test_env.raw, -1), 3, -1)]
         done = False
         if args.lstm_feats:
             with torch.cuda.device (gpu_id):
                 cx, hx = model.lstm.init_hidden (batch_size=1, use_cuda=True)
+        currTime = time.time ()
         while (not done):
             with torch.no_grad ():
                 with torch.cuda.device (gpu_id):
@@ -52,27 +84,105 @@ def inference (args, logger, model, tests, test_env, gpu_id, rng, iter):
                     action = prob.max (1)[1].data.cpu ().numpy ()
 
             obs, _, done, _ = test_env.step_inference (action [0])
-        img = test_env.render ()
+            render_img.append (test_env.pred_lbl2rgb(test_env.lbl))
+
+        render_img = np.concatenate (render_img, 1).astype (np.uint8)
+        render_imgs.append (render_img)
+        
+        clean_reindex (test_env.lbl, args.minsize)    
+        
+        deltaTime = time.time () - currTime
+        eval_times.append (deltaTime)
+        print ("eval time: ", deltaTime)
         if not args.deploy:
+            img = test_env.render ()
             log_img.append (img [:len(img)//2])
-        else:
-            ret.append (test_env.lbl)
+            
+
+        elif args.data in ['cvppp_eval', 'cvppp', "448_cremi", "256_cremi"]:
+            # ret.append(test_env.lbl)
+            # lbl_upsize = cv2.resize (test_env.lbl, original_size, interpolation=cv2.INTER_NEAREST)
+            ret.append(test_env.lbl)
+
+            # # ---------------------------------------- Evaluate ----------------------------------------
+            # bestDice, FgBgDice, diffFG, MWCov, MUCov, AvgFP, AvgFN, rand_i = deploy_evaluate(lbl_upsize, upsize_lbl[idx])
+            # # CVPPP
+            # bestDices.append(bestDice)
+            # FgBgDices.append(FgBgDice)
+            # diffFGs.append(abs (diffFG))
+
+            # # Kitti
+            # MWCovs.append(MWCov)
+            # MUCovs.append(MUCov)
+            # AvgFPs.append(AvgFP)
+            # AvgFNs.append(AvgFN)
+
+            # rand_is.append(rand_i)
+            # ---------------------------------------- End Evaluate ----------------------------------------
+        elif args.data == 'cvppp':
+            ret.append(test_env.lbl)
+
+    print (eval_times)
+    print ("Mean eval times: ", np.mean (eval_times))
 
     if not args.deploy:
         log_img = np.concatenate (log_img, 0)
-        log_info = {"test_samples": log_img}
+        render_imgs = np.concatenate (render_imgs, 0)
+        print (render_imgs.shape)
+        log_info = {"test_samples": log_img, "render_imgs": render_imgs}
         for tag, img in log_info.items ():
             img = img [None]
             logger.image_summary (tag, img, iter)
     else:
+        print("\n------------------------------------------------")
+        print((str(datetime.now()) + "\n"))
         ret = np.array (ret, dtype=np.int32)
-        io.imsave ("deploy/" + "deploy_" + args.data + ".tif", ret)
-        print ("Done!")
+        print (ret.shape)
+        io.imsave ("deploy/" + "deploy_" + args.env + ".tif", ret)
+        # print ("\nExport Images: ", "deploy/" + "deploy_" + args.data + ".tif")
+
+        # if args.data in ['kitti', 'cremi', 'cvppp_eval']:
+        #     print("Evaluate on "+ args.eval_data + " " + args.data)
+        #     log_txt = open("deploy/" + "log_" + str(args.env) + ".txt", "w")
+        #     log_info = {
+        #         "bestDice": np.mean(bestDices),
+        #         "FgBgDice": np.mean(FgBgDices),
+        #         "diffFG": np.mean(diffFGs),
+        #         "MWCov": np.mean(MWCovs),
+        #         "MUCov": np.mean(MUCovs),
+        #         "AvgFP": np.mean(AvgFPs),
+        #         "AvgFN": np.mean(AvgFNs),
+        #         "rand_i": np.mean(rand_is),
+        #     }
+        #     print (log_info)
+        #     log_txt.write("##########################################" + "\n")
+        #     log_txt.write(str(datetime.now()) + "\n")
+        #     for k, v in log_info.items():
+        #         log_txt.write(str(k) + ": " + str(v) + "\n")
+        #         print(str(k) + ": " + str(v) + "\n")
+        #     log_txt.write("##########################################" + "\n")
+        #     log_txt.close()
+
+        print("\nDone !")
+        print("\n------------------------------------------------")
 
 def evaluate (args, env):
 
-    pred_lbl = clean_reindex (env.lbl)
+    pred_lbl = clean_reindex (env.lbl, args.minsize)
     gt_lbl = env.gt_lbl
+
+    bestDice, FgBgDice = GetDices (pred_lbl, gt_lbl)
+
+    diffFG = DiffFGLabels (pred_lbl, gt_lbl)
+
+    MWCov, MUCov, AvgFP, AvgFN  = kitti_metric(pred_lbl, gt_lbl)
+
+    rand_i = adjusted_rand_index(gt_lbl,pred_lbl)
+
+    return bestDice, FgBgDice, diffFG , MWCov, MUCov, AvgFP, AvgFN, rand_i
+
+def deploy_evaluate (lbl, gt_lbl):
+    pred_lbl = clean_reindex (lbl)
 
     bestDice, FgBgDice = GetDices (pred_lbl, gt_lbl)
 
@@ -97,6 +207,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
 
     if not args.deploy:
         log = {}
+
         logger = Logger (args.log_dir)
 
         create_dir (args.log_dir + "models/")
@@ -170,11 +281,22 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
     renderlist.append (player.env.render ())
     max_score = 0
 
+    # ----------------------------------------- Deploy / Inference -----------------------------------------
     if args.deploy:
         with torch.cuda.device (gpu_id):
             player.model.load_state_dict (shared_model.state_dict ())
-        inference (args, None, player.model, tests [0], test_env, gpu_id, player.env.rng, len (tests [0]))
+
+        # inference (args, None, player.model, tests [0], test_env, gpu_id, player.env.rng, len (tests [0]))
+        if len(tests)==4:
+            inference(args, None, player.model, tests[0], test_env, gpu_id, player.env.rng, len(tests[0]), tests[3])
+        else:
+            inference(args, None, player.model, tests[0], test_env, gpu_id, player.env.rng, len(tests[0]))
+
         return
+    # ----------------------------------------- End Deploy / Inference -----------------------------------------
+
+    merge_ratios = []
+    split_ratios = []
 
     while True:
         if flag:
@@ -220,7 +342,7 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                         torch.save (state_to_save, '{0}{1}.dat'.format (args.save_model_dir, args.env + '_' + str (num_tests)))
 
             if num_tests % args.log_period == 0:
-                if tests is not None:
+                if tests is not None and not args.DEBUG:
                     inference (args, logger, player.model, tests [0], test_env, gpu_id, player.env.rng, num_tests)
                 if (np.max (env.lbl) != 0 and np.max (env.gt_lbl) != 0):
                     bestDice, FgBgDice, diffFG, MWCov, MUCov, AvgFP, AvgFN, rand_i = evaluate (args, player.env)
@@ -272,23 +394,26 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                 print (np.concatenate ([values[0][None], values[1][None]], 0))
                 print ("------------------------------------------------")
 
-                log_img = np.concatenate (renderlist, 0)
+                log_img = np.concatenate (renderlist [::-1], 0)
                                 
                 for i in range (3):
                     # if i == 0 and args.seg_scale:
                     #     player.probs.insert (0, player.env.scaler / 1.5)
                     # else:
                     player.probs.insert (0, np.zeros_like (player.probs [0]))
+                while (len (player.probs) - 3 < args.max_episode_length):
+                    player.probs.append (np.zeros_like (player.probs [0]))
                 probslist = [np.repeat (np.expand_dims (prob, -1),3, -1) for prob in player.probs]
                 probslist = np.concatenate (probslist, 1)
                 probslist = (probslist * 256).astype (np.uint8, copy=False)
                 # log_img = renderlist [-1]
-                # log_img = np.concatenate ([log_img, probslist], 0)
+                print (probslist.shape, log_img.shape)
+                log_img = np.concatenate ([probslist, log_img], 0)
 
                 log_info = {"valid_sample": log_img}
 
                 print (log_img.shape)
-                io.imsave (args.log_dir + "tifs/" + "sample.tif", log_img.astype (np.uint8))
+                io.imsave (args.log_dir + "tifs/" + str (num_tests) + "_sample.tif", log_img.astype (np.uint8))
 
                 if args.seg_scale:
                     log_info ["scaler"] = player.env.scaler
@@ -298,12 +423,25 @@ def test (args, shared_model, env_conf, datasets=None, tests=None):
                     img = img [None]
                     logger.image_summary (tag, img, num_tests)
 
-                log_info = {
-                        'mean_valid_reward': reward_mean,
-                        '100_mean_reward': recent_episode_scores.mean ()}
+                if not args.deploy:
+                    log_info = {
+                            'mean_valid_reward': reward_mean,
+                            '100_mean_reward': recent_episode_scores.mean (),
+                            'split_ratio': player.env.split_ratio_sum.sum () / np.count_nonzero (player.env.gt_lbl),
+                            'merge_ratio': player.env.merge_ratio_sum.sum () / np.count_nonzero (player.env.gt_lbl)
+                            }
 
-                for tag, value in log_info.items ():
-                    logger.scalar_summary (tag, value, num_tests)
+                    merge_ratios.append (player.env.merge_ratio_sum.sum () / np.count_nonzero (player.env.gt_lbl))
+                    split_ratios.append (player.env.split_ratio_sum.sum () / np.count_nonzero (player.env.gt_lbl))
+
+                    print ("split ratio: ", np.max (player.env.split_ratio_sum), np.min (player.env.split_ratio_sum))
+                    print ("merge ratio: ", np.max (player.env.merge_ratio_sum), np.min (player.env.merge_ratio_sum))
+                    
+                    print ("merge ratio: ", merge_ratios)
+                    print ("split ratio: ", split_ratios)
+
+                    for tag, value in log_info.items ():
+                        logger.scalar_summary (tag, value, num_tests)
 
             renderlist = []
             reward_sum = 0

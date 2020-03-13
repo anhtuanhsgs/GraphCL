@@ -98,7 +98,7 @@ def debug (tensor):
     for i in range (shape [0]):
         print (tensor_np [i])
 
-def get_model (args, name, input_shape, features, num_actions, split, atrous_rates=[6, 12, 18], gpu_id=0, multi=1):
+def get_model (args, name, input_shape, features, num_actions, split, atrous_rates=[1, 6, 12, 18], gpu_id=0, multi=1):
     level=0
     if args.lowres:
         level = 1

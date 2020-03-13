@@ -178,7 +178,7 @@ def clean (lbl, minsize=40):
     lbl = lbl * mask_sizes [lbl]
     return lbl
 
-def clean_reindex (lbl):
+def clean_reindex (lbl, minsize=40):
     lbl = clean (lbl)
     ret = np.zeros (lbl.shape, dtype=np.int32)
     cur_max_val = 0
@@ -188,7 +188,7 @@ def clean_reindex (lbl):
             continue
         mask = (lbl == val)
         sub_lbl = label (mask, connectivity=1).astype (np.int32)
-        sub_lbl = clean (sub_lbl)
+        sub_lbl = clean (sub_lbl, minsize)
         sub_lbl = label (sub_lbl, connectivity=1).astype (np.int32)
 
         sub_lbl += cur_max_val * (sub_lbl > 0)

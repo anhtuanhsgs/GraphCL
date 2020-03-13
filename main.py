@@ -144,6 +144,7 @@ parser.add_argument(
     action='store_true'
 )
 
+
 parser.add_argument (
     '--recur-feat',
     type=int,
@@ -163,6 +164,12 @@ parser.add_argument (
     type=int,
     default=[16, 48, 96],
     nargs='+'
+)
+
+parser.add_argument (
+    '--eval-data',
+    default='test',
+    choices=['test', 'valid', 'train', 'all']
 )
 
 parser.add_argument (
@@ -250,7 +257,8 @@ parser.add_argument (
 parser.add_argument (
     '--data',
     default='snemi',
-    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'sb2018', 'kitti', 'mnseg2018', "Cityscape", "cremi", "ctDNA"]
+    choices=['syn', 'snemi', 'voronoi', 'zebrafish', 'cvppp', 'cvppp_eval',
+            'sb2018', 'kitti', 'mnseg2018', "Cityscape", "256_cremi", "448_cremi", "cremi", "ctDNA"]
 )
 parser.add_argument (
     '--SEMI_DEBUG',
@@ -346,10 +354,29 @@ parser.add_argument (
 )
 
 parser.add_argument (
+    '--no-aug',
+    action="store_true"
+)
+
+parser.add_argument (
     '--multi',
     type=int,
     default=1,
 )
+
+parser.add_argument (
+    '--max-temp-steps',
+    type=int,
+    default=99,
+)
+
+parser.add_argument (
+    '--T0',
+    type=int,
+    default=0
+)
+
+
 
 def setup_env_conf (args):
 
@@ -360,6 +387,7 @@ def setup_env_conf (args):
         "fgbg_ratio": args.fgbg_ratio,
         "st_fgbg_ratio": args.st_fgbg_ratio,
         "minsize": args.minsize,
+        "no_aug": args.no_aug,
         
         "in_radius": args.in_radius,
         "out_radius": args.out_radius,
@@ -373,11 +401,13 @@ def setup_env_conf (args):
         "reward": args.reward,
         "use_lbl": args.use_lbl,
         "use_masks": args.use_masks,
-        "seg_scale": args.seg_scale,
         "DEBUG": args.DEBUG,
         "dilate_fac": args.dilate_fac,
 
+        "tempT": args.max_temp_steps,
+
         "lowres": args.lowres,
+        "T0": args.T0,
     }
 
     env_conf ["observation_shape"] = [args.data_channel + 1] + env_conf ["size"]
@@ -390,8 +420,6 @@ def setup_env_conf (args):
     if args.use_masks:
         args.env += "_masks"
         env_conf ["observation_shape"][0] += env_conf ["T"]
-    if args.seg_scale:
-        args.env += "_scaled"
 
     args.env += "_" + args.reward
     args.env += "_" + args.data
@@ -401,6 +429,7 @@ def setup_env_conf (args):
     create_dir (args.save_model_dir)
     create_dir (args.log_dir)
     return env_conf
+
  
 def setup_data (args):
     path_test = None
@@ -423,10 +452,16 @@ def setup_data (args):
         args.testlbl = True
     if args.data == "cvppp":
         path_train = "Data/CVPPP_Challenge/train/"
-        path_valid = "Data/CVPPP_Challenge/train/"
-        path_test = "Data/CVPPP_Challenge/test/"
+        path_valid = "Data/CVPPP_Challenge/valid/"
+        path_test = "Data/CVPPP_Challenge/valid/"
         args.data_channel = 3
         args.testlbl = False
+    if args.data == "cvppp_eval":
+        path_train = "Data/CVPPP_Challenge/train/"
+        path_valid = "Data/CVPPP_Challenge/train/"
+        path_test = "Data/CVPPP_Challenge/train/"
+        args.data_channel = 3
+        args.testlbl = True
     if args.data == 'sb2018':
         path_train = "Data/ScienceBowl2018/train/"
         path_valid = "Data/ScienceBowl2018/train/"
@@ -439,6 +474,7 @@ def setup_data (args):
         path_test = "Data/kitti/valid/"
         args.data_channel = 3
         args.testlbl = True
+
     if args.data == 'mnseg2018':
         path_train = "Data/MoNuSeg2018/train/"
         path_valid = "Data/MoNuSeg2018/train/"
@@ -451,10 +487,16 @@ def setup_data (args):
         path_valid = "../Data/cityscape/valid/"
         args.testlbl = True
         args.data_channel = 3
-    if args.data == "cremi":
-        path_train = "Data/Cremi/train/"
-        path_test = "Data/Cremi/train/"
-        path_valid = "Data/Cremi/train/"
+    if args.data == "256_cremi":
+        path_train = "Data/Cremi/256/train/"
+        path_test = "Data/Cremi/256/train/"
+        path_valid = "Data/Cremi/256/test/"
+        args.testlbl = True
+        args.data_channel = 1
+    if args.data == "448_cremi":
+        path_train = "Data/Cremi/448/train/"
+        path_test = "Data/Cremi/448/train/"
+        path_valid = "Data/Cremi/448/test/"
         args.testlbl = True
         args.data_channel = 1
     if args.data == "ctDNA":
@@ -464,7 +506,7 @@ def setup_data (args):
         args.testlbl = True
         args.data_channel = 3
 
-    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish', "cremi", "ctDNA"]
+    relabel = args.data not in ['cvppp', 'sb2018', 'kitti', 'mnseg2018', 'Cityscape', 'zebrafish', "cremi", "ctDNA", "256_cremi", "448_cremi"]
     
     raw, gt_lbl = get_data (path=path_train, relabel=relabel)
     raw_valid, gt_lbl_valid = get_data (path=path_valid, relabel=relabel)
@@ -474,11 +516,34 @@ def setup_data (args):
     if path_test is not None:
         raw_test, gt_lbl_test = get_data (path=path_test, relabel=relabel)
 
+
+    raw_test_upsize = None
+    gt_lbl_test_upsize = None
+    if (args.deploy) and (path_test is not None):
+        if args.eval_data == "test":
+            raw_test_upsize = raw_test
+            gt_lbl_test_upsize = gt_lbl_test
+        elif args.eval_data == "valid":
+            raw_test_upsize = raw_valid
+            gt_lbl_test_upsize = gt_lbl_valid
+            print (raw_test_upsize.shape)
+        elif args.eval_data == "train":
+            raw_test_upsize = raw
+            gt_lbl_test_upsize = gt_lbl
+        elif args.eval_data == "all":
+            # raw_test_upsize = np.concatenate([raw, raw_valid, raw_test], axis=0)
+            # gt_lbl_test_upsize = np.concatenate([gt_lbl, gt_lbl_valid, gt_lbl_test], axis=0)
+            raw_test_upsize = np.concatenate([raw_valid, raw_test], axis=0)
+            gt_lbl_test_upsize = np.concatenate([gt_lbl_valid, gt_lbl_test], axis=0)
+
+
     if (args.DEBUG):
         size = args.size [0] * args.downsample
+        if args.downsample == -1:
+            size = raw[0].shape[0]
         print (raw[0].shape)
-        raw = [raw [20] [30:30+size,30:30+size]]
-        gt_lbl = [gt_lbl [20] [30:30+size,30:30+size]]
+        raw = [raw [i] [0:0+size,0:0+size] for i in range (20, 21)]
+        gt_lbl = [gt_lbl [i] [0:0+size,0:0+size] for i in range (20, 21)]
         raw_valid = np.copy (raw)
         gt_lbl_valid = np.copy (gt_lbl)
 
@@ -498,7 +563,10 @@ def setup_data (args):
         if args.testlbl:
             gt_lbl_test = resize_volume (gt_lbl_test, size, ds)
             
-    return raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test
+    if (args.deploy):
+        return raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test, raw_test_upsize, gt_lbl_test_upsize
+    else:
+        return raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test
 
 if __name__ == '__main__':
     scripts = " ".join (sys.argv[0:])
@@ -512,7 +580,10 @@ if __name__ == '__main__':
         torch.cuda.manual_seed(args.seed)
         mp.set_start_method('spawn')
 
-    raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test = setup_data (args)        
+    if (args.deploy):
+        raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test, raw_test_upsize, gt_lbl_test_upsize = setup_data(args)
+    else:
+        raw, gt_lbl, raw_valid, gt_lbl_valid, raw_test, gt_lbl_test = setup_data (args)      
 
     env_conf = setup_env_conf (args)
 
@@ -538,7 +609,10 @@ if __name__ == '__main__':
 
     processes = []
     if raw_test is not None:
-        p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw_valid, gt_lbl_valid], (raw_test, gt_lbl_test)))
+        if (args.deploy):
+            p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw_valid, gt_lbl_valid], (raw_test, gt_lbl_test, raw_test_upsize, gt_lbl_test_upsize)))
+        else:
+            p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw_valid, gt_lbl_valid], (raw_test, gt_lbl_test)))
     else:
         p = mp.Process(target=test, args=(args, shared_model, env_conf, [raw_valid, gt_lbl_valid]))
     p.start()

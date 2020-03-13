@@ -2,129 +2,7 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-
-def foreground_reward_g (t_new_lbl, t_lbl, t_gt_lbl, last_step, size, gpu_id):
-    lbl = t_lbl
-    gt_lbl = t_gt_lbl
-    new_lbl = t_new_lbl
-    with torch.cuda.device (gpu_id):
-        with torch.no_grad ():
-            reward = torch.zeros (size, dtype=torch.float32, device='cuda', requires_grad=False)
-            foregr_ratio = 0.67
-            reward = ((new_lbl != 0) & (lbl == 0) & (gt_lbl != 0)).float () * (1 - foregr_ratio)
-            if last_step:
-                reward -= ((new_lbl == 0) & (gt_lbl != 0)).float () * (1 - foregr_ratio)
-            return reward
-
-def background_reward_g (t_new_lbl, t_lbl, t_gt_lbl, last_step, size, gpu_id):
-    lbl = t_lbl
-    new_lbl = t_new_lbl
-    gt_lbl = t_gt_lbl
-    with torch.cuda.device (gpu_id):
-        with torch.no_grad ():
-            reward = torch.zeros (size, dtype=torch.float32, device='cuda', requires_grad=False)
-            foregr_ratio = 0.67
-            if last_step:
-                reward += ((new_lbl == 0) & (gt_lbl == 0)).float () * foregr_ratio
-            reward -= ((new_lbl != 0) & (lbl == 0) & (gt_lbl == 0)).float () * foregr_ratio
-            return reward 
-
-def get_I_g (lbl, new_lbl, 
-                lbl_cp, new_lbl_cp, 
-                gt_lbl, gt_lbl_cp, 
-                yr, xr, r, size):
-
-        y_base = r + yr; x_base = r + xr
-        I = new_lbl == new_lbl_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-        I_hat = gt_lbl == gt_lbl_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-        I_old = lbl == lbl_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-        return I, I_hat, I_old
-
-def split_reward_g (t_new_lbl, t_lbl, t_gt_lbl, radius, speed, size, density, T, gpu_id, last_step=False, first_step=False):
-    lbl = t_lbl
-    gt_lbl = t_gt_lbl
-    new_lbl = t_new_lbl
-    with torch.cuda.device (gpu_id):
-        with torch.no_grad ():
-            lbl_cp = F.pad (lbl, (radius, radius, radius, radius), 'constant', 0)
-            new_lbl_cp = F.pad (new_lbl, (radius, radius, radius, radius), 'constant', 0)
-            gt_lbl_cp = F.pad (gt_lbl, (radius, radius, radius, radius), 'constant', 0)
-            density_cp = F.pad (density, (radius, radius, radius, radius), 'constant', 0)
-            reward = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            r = radius
-            I_hat_true_cnt = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            I_hat_false_cnt = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            true_split_reward = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            # false_split_penalty = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            false_merge_penalty = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-
-            for yr in range (-r, r + 1, speed):
-                for xr in range (-r, r + 1, speed):
-                    if (yr == 0 and xr == 0):
-                        continue
-                    y_base = r + yr; x_base = r + xr
-                    I, I_hat, I_old = get_I_g (lbl, new_lbl, lbl_cp, new_lbl_cp, gt_lbl, gt_lbl_cp, yr, xr, r, size)
-                    density_v = density_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-                    gt_lbl_v = gt_lbl_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-                    density_u = density
-                    I_hat_true_cnt += density_v * ((I_hat == True) * (gt_lbl != 0) * (gt_lbl_v != 0)).float ()
-                    I_hat_false_cnt += density_v * ((I_hat == False) * (gt_lbl != 0) * (gt_lbl_v != 0)).float ()
-                    true_split_reward += density_u * density_v * (((I_hat == False) & (I == False) & ((I_old == True) | first_step))  * (gt_lbl != 0) * (gt_lbl_v != 0)).float ()
-                    false_merge_penalty += density_u * density_v * (((I_hat == False) & (I == True)) * (gt_lbl_v != 0) * (gt_lbl != 0)).float ()
-
-            reward -= (false_merge_penalty / (I_hat_false_cnt + 1)) / T
-            reward += true_split_reward / (I_hat_false_cnt + 1)
-            return reward
-
-def merge_reward_g (t_new_lbl, t_lbl, t_gt_lbl, radius, speed, size, density, T, gpu_id, last_step=False, first_step=False):
-    lbl = t_lbl
-    gt_lbl = t_gt_lbl
-    new_lbl = t_new_lbl
-    with torch.cuda.device (gpu_id):
-        with torch.no_grad ():
-            lbl_cp = F.pad (lbl, (radius, radius, radius, radius), 'constant', 0)
-            new_lbl_cp = F.pad (new_lbl, (radius, radius, radius, radius), 'constant', 0)
-            gt_lbl_cp = F.pad (gt_lbl, (radius, radius, radius, radius), 'constant', 0)
-            density_cp = F.pad (density, (radius, radius, radius, radius), 'constant', 0)
-            reward = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            r = radius
-            I_hat_true_cnt = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            I_hat_false_cnt = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            true_merge_reward = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            # false_merge_penalty = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            false_split_penalty = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            for yr in range (-r, r + 1, speed):
-                for xr in range (-r, r + 1, speed):
-                    if (yr == 0 and xr == 0):
-                        continue
-                    y_base = r + yr; x_base = r + xr
-                    I, I_hat, I_old = get_I_g (lbl, new_lbl, lbl_cp, new_lbl_cp, gt_lbl, gt_lbl_cp, yr, xr, r, size)
-                    density_v = density_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-                    gt_lbl_v = gt_lbl_cp [y_base:y_base+size[0], x_base:x_base+size[1]]
-                    density_u = density
-                    I_hat_true_cnt += density_v * ((I_hat == True) * (gt_lbl_v != 0) * (gt_lbl != 0)).float ()
-                    I_hat_false_cnt += density_v * ((I_hat == False) * (gt_lbl_v != 0) * (gt_lbl != 0)).float ()
-                    true_merge_reward += density_u * density_v * (((I_hat == True) & (I == True)) * (gt_lbl_v != 0) * (gt_lbl != 0)).float ()
-                    false_split_penalty += density_u * density_v * (((I_hat == True) & (I == False) & ((I_old == True) | first_step)) * (gt_lbl != 0) * (gt_lbl_v != 0)).float ()
-                    
-            reward -= false_split_penalty / (I_hat_true_cnt + 1)
-            reward += (true_merge_reward / (I_hat_true_cnt + 1)) / T
-            return reward
-
-def first_step_reward_g (t_new_lbl, t_gt_lbl, size, gpu_id):
-    gt_lbl = t_gt_lbl
-    new_lbl = t_new_lbl
-    with torch.cuda.device (gpu_id):
-        with torch.no_grad ():
-            reward = torch.zeros (size, dtype=torch.float32, device="cuda", requires_grad=False)
-            foregr_ratio = 0.66
-            reward += ((new_lbl != 0) & (gt_lbl != 0)).float () * (1.0 - foregr_ratio)
-            reward += ((new_lbl == 0) & (gt_lbl == 0)).float () * (foregr_ratio)
-            reward -= ((new_lbl == 0) & (gt_lbl != 0)).float () * (1.0 - foregr_ratio)
-            reward -= ((new_lbl != 0) & (gt_lbl == 0)).float () * (foregr_ratio)
-            return reward
-
-
+import skimage.io as io
 
 def bdr_cnt_mask (bdr, seg, bdr_sum, T, debug=False):
     bdr_cnt = np.array ([0] * ((2**T) + 1))
@@ -173,7 +51,7 @@ def split_reward_s_onlyInr (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, 
         o_bdr [(gt_lbl==0)|out2] = (2 ** T); o_seg [(gt_lbl==0)|out1] = (2 ** T)
         
         bdr_sum = np.count_nonzero (bdrs[i] * gt_lbl) + 1 #Total non background pixels in bdr 
-        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T, i==3) # #of sames, diffs count in each pixel of inner
+        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T) # #of sames, diffs count in each pixel of inner
         o_bdr_cnt, _o_bdr_cnt = bdr_cnt_mask (o_bdr, o_seg, bdr_sum, T)
 
         t_spl_rew += (_bdr_cnt - _o_bdr_cnt) / bdr_sum
@@ -209,7 +87,7 @@ def split_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scale
         o_bdr [(gt_lbl==0)|out2] = (2 ** T); o_seg [(gt_lbl==0)|out1] = (2 ** T)
         
         bdr_sum = np.count_nonzero (bdrs[i] * gt_lbl) + 1 #Total non background pixels in bdr 
-        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T, i==3) # #of sames, diffs count in each pixel of inner
+        bdr_cnt, _bdr_cnt = bdr_cnt_mask (bdr, seg, bdr_sum, T) # #of sames, diffs count in each pixel of inner
         o_bdr_cnt, _o_bdr_cnt = bdr_cnt_mask (o_bdr, o_seg, bdr_sum, T)
 
         t_spl_rew += (_bdr_cnt - _o_bdr_cnt) / bdr_sum
@@ -219,6 +97,114 @@ def split_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scale
     if scaler is not None:
         ret *= scaler
     return ret.astype (np.float32, copy=False)
+
+def bdr_frac (area, seg, T):
+    bdr_uni = np.unique (seg, return_counts=True)
+    ret = np.array ([0] * ((2**T) + 1), dtype=np.float32)
+    for i in range (len (np.unique (bdr_uni [0]))):
+        ret [bdr_uni[0][i]] = 1.0 * bdr_uni[1][i] / area
+    ret [2 ** T] = 0
+    return ret 
+
+def split_reward_ins (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+    t_spl_rew = np.zeros (lbl.shape, dtype=np.float32) # True split reward
+    f_mer_pen = np.zeros (lbl.shape, dtype=np.float32) # False merge penalty
+
+    frac_per_ins = {}
+    o_frac_per_ins = {}
+    for u in np.unique (gt_lbl):
+        if u == 0:
+            continue
+        seg = segs [u] * lbl
+        o_seg = segs [u] * old_lbl
+        seg [True ^ segs [u]] = (2 ** T)
+        o_seg [True ^ segs [u]] = (2 ** T)
+        area = np.count_nonzero (segs [u] * gt_lbl)
+        frac_per_ins [u] = bdr_frac (area, seg, T)
+        o_frac_per_ins [u] = bdr_frac (area, o_seg, T)
+
+    for u in np.unique (gt_lbl):
+
+        # DEBUG = u == 14
+        DEBUG = False
+
+        if DEBUG:
+            print ("U: ", u)
+        if u == 0:
+            continue
+        bdr = bdrs [u] * gt_lbl;
+        neighbor_ids = np.unique (bdr).tolist ()
+        seg = segs [u] * lbl
+        o_seg = segs [u] * old_lbl
+
+        frac_neighbors = np.array ([0] * ((2**T) + 1), dtype=np.float32)
+        o_frac_neighbors = np.array ([0] * ((2**T) + 1), dtype=np.float32)
+        _frac_neighbors = np.array ([0] * ((2**T) + 1), dtype=np.float32)
+        _o_frac_neighbors = np.array ([0] * ((2**T) + 1), dtype=np.float32)
+
+        if u in neighbor_ids:
+            neighbor_ids.remove (u)
+        if 0 in neighbor_ids:
+            neighbor_ids.remove (0)
+
+        if len (neighbor_ids) == 0:
+            t_spl_rew += segs [u]
+            continue
+
+        for v in neighbor_ids:
+            if (v == 0):
+                continue
+            frac_neighbors += frac_per_ins [v]
+            o_frac_neighbors += o_frac_per_ins [v]
+            _frac_neighbors += 1 - frac_per_ins [v]
+            _o_frac_neighbors += 1 - o_frac_per_ins [v]
+
+        if DEBUG:
+            print ("frac", frac_neighbors)
+            print ("o_frac", o_frac_neighbors)
+            print ("_frac", _frac_neighbors)
+            print ("_o_frac", _o_frac_neighbors)
+
+        num_neighbors = len (neighbor_ids)
+        new_spl_frac = (_frac_neighbors [seg] - _o_frac_neighbors [o_seg]) * segs [u]# Wrong here, different values
+        new_mer_frac = frac_neighbors [seg] * segs [u]
+
+        t_spl_rew += (new_spl_frac / len (neighbor_ids))
+        f_mer_pen += (new_mer_frac / (len (neighbor_ids) * T))
+
+        if DEBUG:
+            rows = 4
+            columns = 2
+            fig = plt.figure(figsize=(8, 8))
+            fig.add_subplot(rows, columns, 1)
+            plt.imshow (segs [u])
+            fig.add_subplot(rows, columns, 2)
+            plt.imshow (np.isin (gt_lbl, neighbor_ids))
+            fig.add_subplot(rows, columns, 3)
+            plt.imshow (old_lbl)
+            fig.add_subplot(rows, columns, 4)
+            plt.imshow (lbl)
+            fig.add_subplot(rows, columns, 5)
+            plt.imshow (t_spl_rew)
+            fig.add_subplot(rows, columns, 6)
+            plt.imshow (f_mer_pen)
+            fig.add_subplot(rows, columns, 7)
+            plt.imshow (gt_lbl)
+            plt.show ()
+
+        # tmp = input ()
+
+        # io.imsave ("lbl.tif", lbl)
+        # io.imsave ("gt_lbl.tif", gt_lbl)
+        # io.imsave ("t_spl_rew", )
+        # tmp = input ()
+
+    ret = t_spl_rew - f_mer_pen
+
+    if scaler is not None:
+        ret *= scaler
+    return ret.astype (np.float32, copy=False)
+
 
 def inr_cnt_mask (inr, seg, inr_sum, T, debug=False):
     inr_cnt = np.array ([0] * ((2**T) + 1))
@@ -264,6 +250,54 @@ def merge_reward_s (old_lbl, lbl, gt_lbl, first_step, segs, inrs, bdrs, T, scale
     if scaler is not None:
         ret *= scaler
     return ret.astype (np.float32, copy=False)
+
+def merge_reward_step (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
+    t_mer_rew = np.zeros (action.shape, dtype=np.float32)
+    f_spl_pen = np.zeros (action.shape, dtype=np.float32)
+    
+    for u in np.unique (gt_lbl):
+
+        # DEBUG = u == 14
+        DEBUG = False
+
+        if u == 0:
+            continue
+        seg = action * segs [u]
+        area = 1.0 * np.count_nonzero (segs [u] * gt_lbl)
+        ones_cnt = 1.0 * np.count_nonzero (seg)
+        zeros_cnt = area - ones_cnt
+        ones_frac = ones_cnt / area
+        zeros_frac = zeros_cnt / area
+        t_mer_rew += (1.0 * seg * ones_frac + (1.0 * segs [u] - 1.0 * seg) * zeros_frac) / T
+        f_spl_pen += (1.0 - t_mer_rew) * segs [u] / T
+
+        if DEBUG:
+            print ("ones_frac", ones_frac, "zeros_frac", zeros_frac)
+
+        if DEBUG:
+            rows = 3
+            columns = 2
+            fig = plt.figure(figsize=(8, 8))
+            fig.add_subplot(rows, columns, 1)
+            plt.imshow (segs [u])
+            fig.add_subplot(rows, columns, 2)
+            plt.imshow (action)
+            fig.add_subplot(rows, columns, 3)
+            plt.imshow (1.0 * seg * ones_frac + (1.0 * segs [u] - 1.0 * seg) * zeros_frac)
+            fig.add_subplot(rows, columns, 4)
+            plt.imshow ((1.0 - t_mer_rew) * segs [u])
+            fig.add_subplot(rows, columns, 5)
+            plt.imshow (seg)
+            fig.add_subplot(rows, columns, 6)
+            plt.imshow (gt_lbl)
+            plt.show ()
+    
+    ret = t_mer_rew - f_spl_pen
+    if scaler is not None:
+        ret *= scaler
+
+    return ret.astype (np.float32, copy=False) 
+
 
 def merge_pen_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
     t_mer_rew = np.zeros (gt_lbl.shape, dtype=np.float32)
@@ -320,6 +354,16 @@ def split_rew_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
         ret *= scaler
     return ret.astype (np.float32, copy=False)
 
+# def sparse_sampling_weight (gt_lbl, rates=[1, 2, 4]):
+#     ret = np.ones (gt_lbl.shape, dtype=np.bool)
+#     rates = sorted (rates) [::-1]
+#     for rate in rates:
+#         sample_lbl = gt_lbl [::rate, ::rate]
+#         sample_ret = ret [::rate, ::rate]
+
+#         padded_sample_lbl = 
+
+#         update = (False==sample_ret) &  
 
 # def split_reward_action (action, gt_lbl, first_step, segs, inrs, bdrs, T, scaler):
 #     t_mer_rew = np.zeros (gt_lbl.shape, dtype=np.float32)
