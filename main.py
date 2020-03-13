@@ -17,9 +17,6 @@ from skimage.measure import label
 from shared_optim import SharedRMSprop, SharedAdam
 from models.models import *
 
-# python main.py --env EM_env_cpu_reward_7 --gpu-id 0 1 2 3 4 5 6 7 --workers 12 --lbl-agents 0 \--num-steps 6 --max-episode-length 6 --reward normal --model AttUNet --merge_radius 16 --merge_speed 2 --split_radius 64 --split_speed 4  --use-lbl --size 128 128 --hidden-feat 2  --log-period 10 --features 16 32 64 128 256 --downsample 3 --data cvppp
-
-
 parser = argparse.ArgumentParser(description='A3C')
 parser.add_argument(
     '--env',
@@ -58,23 +55,23 @@ parser.add_argument(
 parser.add_argument(
     '--workers',
     type=int,
-    default=4,
+    default=8,
     metavar='W',
-    help='how many training processes to use (default: 32)')
+    help='how many training workers to use (default: 8)')
 
 parser.add_argument(
     '--num-steps',
     type=int,
     default=5,
     metavar='NS',
-    help='number of forward steps in A3C (default: 20)')
+    help='n in n-step learning A3C')
 
 parser.add_argument(
     '--max-episode-length',
     type=int,
     default=5,
     metavar='M',
-    help='maximum length of an episode (default: 10000)')
+    help='Number of coloring steps')
 
 parser.add_argument(
     '--save-max',
@@ -156,14 +153,16 @@ parser.add_argument (
     '--in-radius',
     type=float,
     default=[1.1],
-    nargs='+'
+    nargs='+',
+    help='Splitting radii r'
 )
 
 parser.add_argument (
     '--out-radius',
     type=int,
     default=[16, 48, 96],
-    nargs='+'
+    nargs='+',
+    help='Shrinking factors alpha'
 )
 
 parser.add_argument (
@@ -183,7 +182,7 @@ parser.add_argument (
     '--split_radius',
     type=int,
     default=[16, 48, 96],
-    nargs='+'
+    nargs='+', 
 )
 
 parser.add_argument (
@@ -204,14 +203,16 @@ parser.add_argument (
     '--features',
     type=int,
     default= [32, 64, 128, 256],
-    nargs='+'
+    nargs='+', 
+    help='Feature size Attention UNET'
 )
 
 parser.add_argument (
     '--size',
     type=int,
     default= [96, 96],
-    nargs='+'
+    nargs='+',
+    help='Input processing size of agent, if processing size is smaller than size of images in the data, input will be cropped from the image',
 )
 
 parser.add_argument (
@@ -246,7 +247,8 @@ parser.add_argument (
 parser.add_argument (
     '--downsample',
     type=int,
-    default=1
+    default=1,
+    help='Data down-sampling rate, -1 to have all images down-sampled to input processing size of agent',
 )
 
 parser.add_argument (
@@ -267,7 +269,8 @@ parser.add_argument (
 
 parser.add_argument (
     '--deploy',
-    action='store_true'
+    action='store_true',
+    help='Enable for test set deployment',
 )
 
 parser.add_argument (
@@ -310,12 +313,14 @@ parser.add_argument (
     '--spl_w',
     type=float,
     default=2,
+    help='Splitting weight w_s',
 )
 
 parser.add_argument (
     '--mer_w',
     type=float,
     default=1,
+    help='Merging weight w_s',
 )
 
 parser.add_argument (
@@ -333,13 +338,15 @@ parser.add_argument (
     '--valid-gpu',
     type=int,
     default=-1,
+    help='Choose gpu for validation',
 )
 
 parser.add_argument (
     '--atr-rate',
     type=int,
     default= [6, 12, 18],
-    nargs='+'
+    nargs='+',
+    help='Attrous spatial rates',
 )
 
 parser.add_argument (
@@ -453,13 +460,13 @@ def setup_data (args):
     if args.data == "cvppp":
         path_train = "Data/CVPPP_Challenge/train/"
         path_valid = "Data/CVPPP_Challenge/valid/"
-        path_test = "Data/CVPPP_Challenge/valid/"
+        path_test = "Data/CVPPP_Challenge/test/"
         args.data_channel = 3
         args.testlbl = False
     if args.data == "cvppp_eval":
         path_train = "Data/CVPPP_Challenge/train/"
         path_valid = "Data/CVPPP_Challenge/train/"
-        path_test = "Data/CVPPP_Challenge/train/"
+        path_test = "Data/CVPPP_Challenge/test/"
         args.data_channel = 3
         args.testlbl = True
     if args.data == 'sb2018':

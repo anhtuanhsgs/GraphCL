@@ -28,7 +28,6 @@ import time
 from rewards import *
 
 # python main.py --env EM_env_DEBUG_1 --gpu-id 0 1 2 3 4 5 6 7 --workers 12 --lbl-agents 2 \--num-steps 5 --max-episode-length 5 --reward normal --model DilatedUNet --merge_radius 16 --merge_speed 2 --split_radius 64 --split_speed 4  --use-lbl --size 128 128 --hidden-feat 2  --log-period 10 --features 32 64 128 256 --downsample 2 --data zebrafish
-debug = True
 
 class General_env (gym.Env):
     def init (self, config):
