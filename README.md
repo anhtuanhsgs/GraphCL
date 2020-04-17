@@ -56,7 +56,7 @@ bash cvppp_deploy.sh
 Results are stored at ```deploy/```
 
 
-# Related papers
+## Related papers
 * Fully Convolutional Network with Multi-Step Reinforcement Learning for Image Processing (AAAI2019) [[paper](https://arxiv.org/abs/1811.04323)]
 * Instance Segmentation by Deep Coloring [[paper](https://arxiv.org/abs/1807.10007)]
 * Recurrent instance segmentation (ECCV2016) [[paper](https://arxiv.org/abs/1511.08250)]
