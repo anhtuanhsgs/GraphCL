@@ -56,8 +56,15 @@ bash cvppp_deploy.sh
 Results are stored at ```deploy/```
 
 
-
-
+# Related papers
+* Fully Convolutional Network with Multi-Step Reinforcement Learning for Image Processing (AAAI2019) [[paper](https://arxiv.org/abs/1811.04323)]
+* Instance Segmentation by Deep Coloring [[paper](https://arxiv.org/abs/1807.10007)]
+* Recurrent instance segmentation (ECCV2016) [[paper](https://arxiv.org/abs/1511.08250)]
+* Recurrent Pixel Embedding for Instance Grouping (CVPR2018) [[paper](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8579038)]
+* Towards End-to-End Lane Detection: an Instance Segmentation Approach [[paper](https://arxiv.org/abs/1802.05591)]
+* Semantic Instance Segmentation with a Discriminative Loss Function [[paper](https://arxiv.org/abs/1708.02551)]
+* Actor-critic instance segmentation (CVPR2019) [[paper](https://arxiv.org/abs/1904.05126)]
+* Learning to Cluster for Proposal-Free Instance Segmentation [[paper](https://arxiv.org/abs/1803.06459)]
 
 
 
