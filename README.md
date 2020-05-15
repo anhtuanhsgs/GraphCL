@@ -1,5 +1,7 @@
 # Reinforced Coloring for End-to-End Instance Segmentation
 
+[[arXiv preprint](https://arxiv.org/abs/2005.07058)]
+
 ## Installation
 We tested our code with ```CUDA 10.0```, ```pytorch 1.1.0```, ```gym 0.14.0```
 for more information about the dependencies, please view ```dependencies.txt```
